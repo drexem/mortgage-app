@@ -1,0 +1,455 @@
+@page "/sporenie"
+@attribute [Authorize]
+@rendermode InteractiveServer
+
+@using System.Globalization
+@using System.Security.Claims
+@using Microsoft.EntityFrameworkCore
+
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject FinancialDataService DataService
+
+<PageTitle>Sporiace účty</PageTitle>
+
+@if (loading)
+{
+    <div class="loading-state">Načítavam sporiace účty...</div>
+}
+else
+{
+    <header class="page-heading">
+        <div>
+            <p class="eyebrow">Optimalizované sporenie</p>
+            <h1>Kam poslať peniaze</h1>
+            <p class="muted">Zadaj podiel sporenia a investovania. Nové vklady do sporenia aplikácia rozdelí podľa najlepšieho čistého úroku.</p>
+        </div>
+        @if (!string.IsNullOrWhiteSpace(message))
+        {
+            <span class="save-message">@message</span>
+        }
+    </header>
+    @if (!string.IsNullOrWhiteSpace(errorMessage))
+    {
+        <div class="alert alert-danger">@errorMessage</div>
+    }
+
+    <section class="summary-grid">
+        <article class="summary-card">
+            <span>Počet účtov</span>
+            <strong>@accounts.Count</strong>
+        </article>
+        <article class="summary-card">
+            <span>Celkový zostatok</span>
+            <strong>@Money(accounts.Sum(x => x.Balance))</strong>
+        </article>
+        <article class="summary-card">
+            <span>Aktuálne investované</span>
+            <strong>@Money(currentInvestmentBalance)</strong>
+            <small>bez započítania výnosu</small>
+        </article>
+        <article class="summary-card accent-card">
+            <span>Vklad tento mesiac</span>
+            <strong>@Money(currentSavingsContribution)</strong>
+            <small>@savingsRatePercent.ToString("N0") % z kladného prebytku</small>
+        </article>
+        <article class="summary-card">
+            <span>Odhad úroku za 12 mesiacov</span>
+            <strong>@Money(projectedInterest)</strong>
+        </article>
+    </section>
+
+    <section class="panel recommendation-panel">
+        <div class="recommendation-budget">
+            <div>
+                <p class="eyebrow">Rozdelenie kladného prebytku</p>
+                <h2>Koľko sporiť a koľko investovať?</h2>
+            </div>
+            <div class="budget-control">
+                <div class="field">
+                    <label>Sporiace účty (%)</label>
+                    <input type="number" min="0" max="100" step="1" class="form-control"
+                           @bind="SavingsRateInput" @bind:event="oninput" />
+                </div>
+                <div class="field">
+                    <label>Investície (%)</label>
+                    <input type="number" min="0" max="100" step="1" class="form-control"
+                           @bind="InvestmentRateInput" @bind:event="oninput" />
+                </div>
+                <div class="field">
+                    <label>Aktuálne v investíciách</label>
+                    <input type="number" min="0" step="100" class="form-control" @bind="currentInvestmentBalance" />
+                </div>
+                <button class="btn btn-primary" type="button" @onclick="SaveSavingsRateAsync">Uložiť a prepočítať</button>
+            </div>
+        </div>
+        <p class="muted planning-help">Súčet je vždy 100 %. Pri zmene jedného percenta sa druhé automaticky dopočíta. Investície sa v odhadoch počítajú bez zisku.</p>
+
+        @if (accounts.Count == 0)
+        {
+            <div class="empty-state">Najprv pridaj aspoň jeden sporiaci účet a jeho úrokové pásma.</div>
+        }
+        else if (currentSavingsContribution <= 0)
+        {
+            <div class="recommendation-empty">
+                @if (nextBest is not null)
+                {
+                    <span>Najlepší účet pre ďalšie peniaze je</span>
+                    <strong>@nextBest.AccountName</strong>
+                    <small>@AccountBank(nextBest) · čistá sadzba @Percent(nextBest.NetAnnualRate)</small>
+                }
+                <span>Tento mesiac nie je kladný prebytok určený na sporenie.</span>
+            </div>
+        }
+        else
+        {
+            <div class="allocation-list">
+                @for (var index = 0; index < allocationPlan.Allocations.Count; index++)
+                {
+                    var allocation = allocationPlan.Allocations[index];
+                    <div class="allocation-row">
+                        <div class="allocation-order">@(index + 1)</div>
+                        <div>
+                            <span>Pošli na</span>
+                            <strong>@allocation.AccountName</strong>
+                            <small>@AccountBank(allocation)</small>
+                        </div>
+                        <div class="allocation-rate">
+                            <span>Čistá sadzba</span>
+                            <strong>@Percent(allocation.NetAnnualRate)</strong>
+                            <small>hrubá @Percent(allocation.GrossAnnualRate)</small>
+                        </div>
+                        <div class="allocation-amount">@Money(allocation.Amount)</div>
+                    </div>
+                }
+                @if (allocationPlan.UnallocatedAmount > 0)
+                {
+                    <div class="alert alert-warning mb-0">
+                        Pre @Money(allocationPlan.UnallocatedAmount) nie je nastavené žiadne dostupné úrokové pásmo.
+                    </div>
+                }
+            </div>
+        }
+    </section>
+
+    <section class="savings-layout">
+        <aside class="panel account-sidebar">
+            <div class="panel-header">
+                <div>
+                    <p class="eyebrow">Účty</p>
+                    <h2>Vyber účet</h2>
+                </div>
+                <button class="btn btn-primary btn-small" type="button" @onclick="CreateAccountAsync">Pridať</button>
+            </div>
+
+            @if (accounts.Count == 0)
+            {
+                <div class="empty-state">Zatiaľ nemáš vytvorený žiadny sporiaci účet.</div>
+            }
+            else
+            {
+                <div class="account-list">
+                    @foreach (var item in accounts)
+                    {
+                        <button class="account-list-item @(item.Id == account?.Id ? "active" : "")"
+                                type="button"
+                                @onclick="() => SelectAccount(item.Id)">
+                            <span>@item.Name</span>
+                            <small>@(string.IsNullOrWhiteSpace(item.BankName) ? "Bez banky" : item.BankName)</small>
+                            <strong>@Money(item.Balance)</strong>
+                        </button>
+                    }
+                </div>
+            }
+        </aside>
+
+        <div class="savings-detail">
+            @if (account is not null)
+            {
+                <article class="panel">
+                    <div class="panel-header">
+                        <div>
+                            <p class="eyebrow">Vybraný účet</p>
+                            <h2>Nastavenie účtu a pásiem</h2>
+                        </div>
+                        <button class="btn btn-danger-soft btn-small" type="button" @onclick="DeleteAccountAsync">Odstrániť účet</button>
+                    </div>
+
+                    <EditForm Model="account" OnValidSubmit="SaveAsync" @onchange="Recalculate">
+                        <DataAnnotationsValidator />
+                        <ValidationSummary class="text-danger" />
+
+                        <div class="form-grid">
+                            <div class="field">
+                                <label>Názov účtu</label>
+                                <InputText class="form-control" @bind-Value="account.Name" />
+                            </div>
+                            <div class="field">
+                                <label>Banka alebo poskytovateľ</label>
+                                <InputText class="form-control" @bind-Value="account.BankName" />
+                            </div>
+                            <div class="field">
+                                <label>Aktuálny zostatok</label>
+                                <InputNumber class="form-control" @bind-Value="account.Balance" />
+                            </div>
+                            <div class="field">
+                                <label>Daň z úroku (%)</label>
+                                <InputNumber class="form-control" @bind-Value="account.InterestTaxPercent" />
+                            </div>
+                            <div class="field check-field span-2">
+                                <label>
+                                    <InputCheckbox @bind-Value="account.MeetsBonusConditions" />
+                                    Pripočítať bonusovú sadzbu k základnej sadzbe
+                                </label>
+                            </div>
+                        </div>
+
+                        <h3 class="section-title">Úrokové pásma</h3>
+                        <p class="muted tier-help">Pásma zadávaj súvislo od 0. Bonus je prirážka k základnej sadzbe, napríklad základ 3 % + bonus 1 % = spolu 4 %.</p>
+                        <div class="tier-table">
+                            <div class="tier-row tier-head">
+                                <span>Od</span><span>Do</span><span>Základ %</span><span>Bonus navyše %</span><span></span>
+                            </div>
+                            @foreach (var tier in account.RateTiers.OrderBy(x => x.SortOrder))
+                            {
+                                <div class="tier-row">
+                                    <InputNumber class="form-control" @bind-Value="tier.FromAmount" />
+                                    <InputNumber class="form-control" @bind-Value="tier.ToAmount" placeholder="Bez limitu" />
+                                    <InputNumber class="form-control" @bind-Value="tier.BaseAnnualRate" />
+                                    <InputNumber class="form-control" @bind-Value="tier.BonusAnnualRate" />
+                                    <button class="icon-button" type="button" @onclick="() => RemoveTier(tier)">×</button>
+                                </div>
+                            }
+                        </div>
+
+                        <div class="form-actions">
+                            <button class="btn btn-secondary" type="button" @onclick="AddTier">Pridať pásmo</button>
+                            <button class="btn btn-primary" type="submit">Uložiť účet</button>
+                        </div>
+                    </EditForm>
+                </article>
+            }
+
+            <article class="panel">
+                <div class="panel-header">
+                    <div>
+                        <p class="eyebrow">Optimalizovaná projekcia</p>
+                        <h2>Najbližších 12 mesiacov</h2>
+                    </div>
+                </div>
+                <div class="projection-list">
+                    @foreach (var row in portfolioProjection)
+                    {
+                        <div class="portfolio-projection-row">
+                            <span>@MonthName(row.Month)</span>
+                            <small>@AllocationText(row.Allocations)</small>
+                            <span>+ @Money(row.NetInterest) úrok</span>
+                            <strong>@Money(row.TotalBalance)</strong>
+                        </div>
+                    }
+                </div>
+            </article>
+        </div>
+    </section>
+}
+
+@code {
+    private readonly CultureInfo culture = CultureInfo.GetCultureInfo("sk-SK");
+    private List<SavingsAccount> accounts = [];
+    private SavingsAccount? account;
+    private SavingsAllocationPlan allocationPlan = new([], 0);
+    private SavingsAllocation? nextBest;
+    private IReadOnlyList<SavingsPortfolioProjectionRow> portfolioProjection = [];
+    private readonly List<CashFlowEntry> cashFlowEntries = [];
+    private MortgagePlan mortgage = new();
+    private string userId = "";
+    private string currency = "CZK";
+    private string? message;
+    private string? errorMessage;
+    private bool loading = true;
+    private decimal savingsRatePercent = 100m;
+    private decimal investmentRatePercent;
+    private decimal currentInvestmentBalance;
+    private decimal currentSavingsContribution;
+    private decimal projectedInterest;
+    private decimal SavingsRateInput
+    {
+        get => savingsRatePercent;
+        set
+        {
+            savingsRatePercent = Math.Clamp(value, 0m, 100m);
+            investmentRatePercent = 100m - savingsRatePercent;
+        }
+    }
+    private decimal InvestmentRateInput
+    {
+        get => investmentRatePercent;
+        set
+        {
+            investmentRatePercent = Math.Clamp(value, 0m, 100m);
+            savingsRatePercent = 100m - investmentRatePercent;
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        userId = auth.User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "";
+        await LoadAsync();
+        loading = false;
+    }
+
+    private async Task LoadAsync(int? selectedAccountId = null)
+    {
+        selectedAccountId ??= account?.Id;
+        accounts = await DataService.GetSavingsAccountsAsync(userId);
+        account = accounts.FirstOrDefault(x => x.Id == selectedAccountId) ?? accounts.FirstOrDefault();
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var user = await db.Users.SingleAsync(x => x.Id == userId);
+        currency = user.PreferredCurrency;
+        savingsRatePercent = user.SavingsRatePercent;
+        investmentRatePercent = user.InvestmentRatePercent;
+        currentInvestmentBalance = user.InvestmentBalance;
+        cashFlowEntries.Clear();
+        cashFlowEntries.AddRange(await db.CashFlowEntries.Where(x => x.UserId == userId).ToListAsync());
+        mortgage = await DataService.GetOrCreateMortgagePlanAsync(userId);
+        Recalculate();
+    }
+
+    private void SelectAccount(int id)
+    {
+        account = accounts.Single(x => x.Id == id);
+        message = null;
+        Recalculate();
+    }
+
+    private void Recalculate()
+    {
+        var cashFlowProjection = FinancialCalculator.ProjectCashFlow(
+            cashFlowEntries,
+            DateTime.Today,
+            mortgage,
+            savingsRatePercent,
+            investmentRatePercent);
+        currentSavingsContribution = cashFlowProjection.First().SavingsContribution;
+        allocationPlan = FinancialCalculator.PlanSavingsAllocation(accounts, currentSavingsContribution);
+        nextBest = FinancialCalculator.PlanSavingsAllocation(accounts, 1m).Allocations.FirstOrDefault();
+        portfolioProjection = FinancialCalculator.ProjectSavingsPortfolio(
+            accounts,
+            cashFlowProjection.Select(x => x.SavingsContribution));
+        var projectedDeposits = portfolioProjection.Sum(row => row.Allocations.Sum(x => x.Amount));
+        projectedInterest = portfolioProjection.Count == 0
+            ? 0
+            : portfolioProjection[^1].TotalBalance - accounts.Sum(x => x.Balance) - projectedDeposits;
+        StateHasChanged();
+    }
+
+    private async Task SaveSavingsRateAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var user = await db.Users.SingleAsync(x => x.Id == userId);
+        user.SavingsRatePercent = Math.Clamp(savingsRatePercent, 0m, 100m);
+        user.InvestmentRatePercent = 100m - user.SavingsRatePercent;
+        user.InvestmentBalance = Math.Max(0m, currentInvestmentBalance);
+        savingsRatePercent = user.SavingsRatePercent;
+        investmentRatePercent = user.InvestmentRatePercent;
+        currentInvestmentBalance = user.InvestmentBalance;
+        await db.SaveChangesAsync();
+        message = "Rozdelenie prebytku medzi sporenie a investície je uložené.";
+        Recalculate();
+    }
+
+    private async Task CreateAccountAsync()
+    {
+        try
+        {
+            errorMessage = null;
+            var created = await DataService.CreateSavingsAccountAsync(userId);
+            message = "Nový účet bol vytvorený. Doplň jeho detaily a pásma.";
+            await LoadAsync(created.Id);
+        }
+        catch (DbUpdateException)
+        {
+            message = null;
+            errorMessage = "Sporiaci účet sa nepodarilo vytvoriť. Reštartuj aplikáciu a skús to znova.";
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (account is null)
+        {
+            return;
+        }
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var stored = await db.SavingsAccounts.Include(x => x.RateTiers)
+            .SingleAsync(x => x.Id == account.Id && x.UserId == userId);
+
+        stored.Name = account.Name;
+        stored.BankName = account.BankName;
+        stored.Balance = account.Balance;
+        stored.InterestTaxPercent = account.InterestTaxPercent;
+        stored.MeetsBonusConditions = account.MeetsBonusConditions;
+        stored.UpdatedAtUtc = DateTime.UtcNow;
+
+        db.SavingsRateTiers.RemoveRange(stored.RateTiers);
+        stored.RateTiers = account.RateTiers.OrderBy(x => x.FromAmount).Select((tier, index) => new SavingsRateTier
+        {
+            FromAmount = tier.FromAmount,
+            ToAmount = tier.ToAmount,
+            BaseAnnualRate = tier.BaseAnnualRate,
+            BonusAnnualRate = tier.BonusAnnualRate,
+            SortOrder = index + 1
+        }).ToList();
+
+        await db.SaveChangesAsync();
+        message = "Sporiaci účet je uložený.";
+        await LoadAsync(stored.Id);
+    }
+
+    private async Task DeleteAccountAsync()
+    {
+        if (account is null)
+        {
+            return;
+        }
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var stored = await db.SavingsAccounts.SingleOrDefaultAsync(x => x.Id == account.Id && x.UserId == userId);
+        if (stored is not null)
+        {
+            db.SavingsAccounts.Remove(stored);
+            await db.SaveChangesAsync();
+        }
+
+        message = "Sporiaci účet bol odstránený.";
+        account = null;
+        await LoadAsync();
+    }
+
+    private void AddTier()
+    {
+        account?.RateTiers.Add(new SavingsRateTier { SortOrder = account.RateTiers.Count + 1 });
+        Recalculate();
+    }
+
+    private void RemoveTier(SavingsRateTier tier)
+    {
+        account?.RateTiers.Remove(tier);
+        Recalculate();
+    }
+
+    private string AllocationText(IReadOnlyList<SavingsAllocation> allocations)
+        => allocations.Count == 0
+            ? "Bez mesačného vkladu"
+            : string.Join(", ", allocations.Select(x => $"{Money(x.Amount)} → {x.AccountName}"));
+
+    private string AccountBank(SavingsAllocation allocation)
+        => string.IsNullOrWhiteSpace(allocation.BankName) ? "Bez banky" : allocation.BankName;
+
+    private string MonthName(int offset) => DateTime.Today.AddMonths(offset).ToString("MMM yyyy", culture);
+    private string Money(decimal value) => $"{value.ToString("N0", culture)} {currency}";
+    private string Percent(decimal value) => $"{value.ToString("N2", culture)} %";
+}

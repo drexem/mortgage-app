@@ -1,0 +1,59 @@
+@page "/nastavenia"
+@attribute [Authorize]
+@rendermode InteractiveServer
+
+@using System.Security.Claims
+@using Microsoft.EntityFrameworkCore
+
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+
+<PageTitle>Nastavenia</PageTitle>
+
+<header class="page-heading">
+    <div>
+        <p class="eyebrow">Nastavenia</p>
+        <h1>Preferencie aplikácie</h1>
+        <p class="muted">Mena mení označenie súm; hodnoty sa automaticky neprepočítavajú kurzom.</p>
+    </div>
+    @if (!string.IsNullOrWhiteSpace(message))
+    {
+        <span class="save-message">@message</span>
+    }
+</header>
+
+<section class="panel settings-panel">
+    <div class="field">
+        <label for="currency">Mena</label>
+        <select id="currency" class="form-select" @bind="currency">
+            <option value="CZK">CZK - Česká koruna</option>
+            <option value="EUR">EUR - Euro</option>
+            <option value="USD">USD - Americký dolár</option>
+            <option value="GBP">GBP - Britská libra</option>
+        </select>
+    </div>
+    <button class="btn btn-primary" @onclick="SaveAsync">Uložiť nastavenia</button>
+</section>
+
+@code {
+    private string userId = "";
+    private string currency = "CZK";
+    private string? message;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        userId = auth.User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "";
+        await using var db = await DbFactory.CreateDbContextAsync();
+        currency = await db.Users.Where(x => x.Id == userId).Select(x => x.PreferredCurrency).SingleAsync();
+    }
+
+    private async Task SaveAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var user = await db.Users.SingleAsync(x => x.Id == userId);
+        user.PreferredCurrency = currency;
+        await db.SaveChangesAsync();
+        message = "Nastavenia sú uložené.";
+    }
+}

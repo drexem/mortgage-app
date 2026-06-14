@@ -1,0 +1,167 @@
+@page "/hypoteka"
+@attribute [Authorize]
+@rendermode InteractiveServer
+
+@using System.Globalization
+@using System.Security.Claims
+@using Microsoft.EntityFrameworkCore
+
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject FinancialDataService DataService
+
+<PageTitle>Hypotéka</PageTitle>
+
+@if (loading)
+{
+    <div class="loading-state">Načítavam hypotéku...</div>
+}
+else
+{
+    <header class="page-heading">
+        <div>
+            <p class="eyebrow">Hypotekárna kalkulačka</p>
+            <h1>Plán financovania bývania</h1>
+            <p class="muted">Výpočet používa štandardnú anuitnú splátku bez poplatkov a poistenia.</p>
+        </div>
+        @if (!string.IsNullOrWhiteSpace(message))
+        {
+            <span class="save-message">@message</span>
+        }
+    </header>
+
+    <section class="summary-grid">
+        <article class="summary-card accent-card">
+            <span>Mesačná splátka</span>
+            <strong>@Money(result.MonthlyPayment)</strong>
+        </article>
+        <article class="summary-card">
+            <span>Výška hypotéky</span>
+            <strong>@Money(result.Principal)</strong>
+        </article>
+        <article class="summary-card">
+            <span>LTV</span>
+            <strong>@result.LtvPercent.ToString("N1") %</strong>
+        </article>
+        <article class="summary-card">
+            <span>Zaplatené celkom</span>
+            <strong>@Money(result.TotalPaid)</strong>
+        </article>
+    </section>
+
+    <section class="two-panel-grid mortgage-layout">
+        <article class="panel">
+            <div class="panel-header">
+                <div>
+                    <p class="eyebrow">Vstupné údaje</p>
+                    <h2>Nastavenie hypotéky</h2>
+                </div>
+            </div>
+
+            <EditForm Model="plan" OnValidSubmit="SaveAsync" @oninput="Recalculate">
+                <DataAnnotationsValidator />
+                <ValidationSummary class="text-danger" />
+
+                <div class="form-grid">
+                    <div class="field span-2">
+                        <label>Cena nehnuteľnosti</label>
+                        <InputNumber class="form-control" @bind-Value="plan.PropertyPrice" />
+                    </div>
+                    <div class="field span-2">
+                        <label>Vlastné zdroje</label>
+                        <InputNumber class="form-control" @bind-Value="plan.OwnFunds" />
+                    </div>
+                    <div class="field">
+                        <label>Ročný úrok (%)</label>
+                        <InputNumber class="form-control" @bind-Value="plan.AnnualInterestRate" />
+                    </div>
+                    <div class="field">
+                        <label>Splatnosť (roky)</label>
+                        <InputNumber class="form-control" @bind-Value="plan.TermYears" />
+                    </div>
+                    <div class="field span-2">
+                        <label>Dátum prvej splátky</label>
+                        <InputDate class="form-control" @bind-Value="plan.FirstPaymentDate" />
+                        <small class="muted">Od tohto mesiaca sa splátka automaticky započíta do cash flow.</small>
+                    </div>
+                </div>
+
+                <button class="btn btn-primary w-100 mt-3" type="submit">Uložiť hypotéku</button>
+            </EditForm>
+        </article>
+
+        <article class="panel">
+            <div class="panel-header">
+                <div>
+                    <p class="eyebrow">Výsledok</p>
+                    <h2>Finančný dopad</h2>
+                </div>
+            </div>
+
+            <div class="result-hero">
+                <span>Každý mesiac</span>
+                <strong>@Money(result.MonthlyPayment)</strong>
+                <small>pri úroku @plan.AnnualInterestRate.ToString("N2") % p.a.</small>
+            </div>
+
+            <div class="result-list">
+                <div><span>Istina</span><strong>@Money(result.Principal)</strong></div>
+                <div><span>Úroky spolu</span><strong>@Money(result.TotalPaid - result.Principal)</strong></div>
+                <div><span>Počet splátok</span><strong>@(plan.TermYears * 12)</strong></div>
+                <div><span>Prvá splátka</span><strong>@plan.FirstPaymentDate.ToString("d. M. yyyy")</strong></div>
+                <div><span>Úspory po vložení vlastných zdrojov</span><strong>@Money(remainingSavings)</strong></div>
+                <div><span>Rezerva v splátkach</span><strong>@reserveMonths.ToString("N1") mes.</strong></div>
+            </div>
+        </article>
+    </section>
+}
+
+@code {
+    private readonly CultureInfo culture = CultureInfo.GetCultureInfo("sk-SK");
+    private MortgagePlan plan = new();
+    private MortgageResult result = new(0, 0, 0, 0);
+    private string userId = "";
+    private string currency = "CZK";
+    private string? message;
+    private bool loading = true;
+    private decimal savingsBalance;
+    private decimal remainingSavings;
+    private decimal reserveMonths;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        userId = auth.User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "";
+        plan = await DataService.GetOrCreateMortgagePlanAsync(userId);
+        var savingsAccounts = await DataService.GetSavingsAccountsAsync(userId);
+        savingsBalance = savingsAccounts.Sum(x => x.Balance);
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        currency = await db.Users.Where(x => x.Id == userId).Select(x => x.PreferredCurrency).SingleAsync();
+        Recalculate();
+        loading = false;
+    }
+
+    private void Recalculate()
+    {
+        result = FinancialCalculator.CalculateMortgage(plan);
+        remainingSavings = Math.Max(0, savingsBalance - plan.OwnFunds);
+        reserveMonths = result.MonthlyPayment == 0 ? 0 : remainingSavings / result.MonthlyPayment;
+    }
+
+    private async Task SaveAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var stored = await db.MortgagePlans.SingleAsync(x => x.UserId == userId);
+        stored.PropertyPrice = plan.PropertyPrice;
+        stored.OwnFunds = plan.OwnFunds;
+        stored.AnnualInterestRate = plan.AnnualInterestRate;
+        stored.TermYears = plan.TermYears;
+        stored.FirstPaymentDate = plan.FirstPaymentDate;
+        await db.SaveChangesAsync();
+        message = "Hypotéka je uložená.";
+        Recalculate();
+    }
+
+    private string Money(decimal value) => $"{value.ToString("N0", culture)} {currency}";
+}

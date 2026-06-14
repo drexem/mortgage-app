@@ -1,0 +1,88 @@
+@page "/Account/Login"
+
+@inject SignInManager<ApplicationUser> SignInManager
+@inject ILogger<Login> Logger
+@inject IdentityRedirectManager RedirectManager
+
+<PageTitle>Prihlásenie</PageTitle>
+
+<div class="auth-shell">
+    <div class="auth-card">
+        <a class="brand brand-dark" href="/">Finančný plán</a>
+        <p class="eyebrow">Vitaj späť</p>
+        <h1>Prihlásenie</h1>
+        <p class="muted">Pokračuj vo svojom finančnom prehľade.</p>
+
+        @if (!string.IsNullOrWhiteSpace(errorMessage))
+        {
+            <div class="alert alert-danger">@errorMessage</div>
+        }
+
+        <EditForm Model="Input" method="post" OnValidSubmit="LoginUser" FormName="login">
+            <DataAnnotationsValidator />
+            <ValidationSummary class="text-danger" />
+
+            <label class="field-label" for="login-email">E-mail</label>
+            <InputText id="login-email" class="form-control" @bind-Value="Input.Email" autocomplete="username" />
+
+            <label class="field-label" for="login-password">Heslo</label>
+            <InputText id="login-password" type="password" class="form-control" @bind-Value="Input.Password" autocomplete="current-password" />
+
+            <label class="check-row">
+                <InputCheckbox @bind-Value="Input.RememberMe" />
+                Zostať prihlásený
+            </label>
+
+            <button class="btn btn-primary w-100" type="submit">Prihlásiť sa</button>
+        </EditForm>
+
+        <p class="auth-switch">Nemáš účet? <a href="Account/Register">Vytvor si ho</a></p>
+    </div>
+</div>
+
+@code {
+    private string? errorMessage;
+
+    [SupplyParameterFromForm]
+    private LoginInput Input { get; set; } = default!;
+
+    [SupplyParameterFromQuery]
+    private string? ReturnUrl { get; set; }
+
+    protected override void OnInitialized()
+    {
+        Input ??= new();
+    }
+
+    private async Task LoginUser()
+    {
+        var result = await SignInManager.PasswordSignInAsync(
+            Input.Email,
+            Input.Password,
+            Input.RememberMe,
+            lockoutOnFailure: true);
+
+        if (result.Succeeded)
+        {
+            Logger.LogInformation("User logged in.");
+            RedirectManager.RedirectTo(ReturnUrl);
+            return;
+        }
+
+        errorMessage = result.IsLockedOut
+            ? "Účet je dočasne zablokovaný. Skús to neskôr."
+            : "Nesprávny e-mail alebo heslo.";
+    }
+
+    private sealed class LoginInput
+    {
+        [Required(ErrorMessage = "Zadaj e-mail.")]
+        [EmailAddress(ErrorMessage = "Zadaj platný e-mail.")]
+        public string Email { get; set; } = "";
+
+        [Required(ErrorMessage = "Zadaj heslo.")]
+        public string Password { get; set; } = "";
+
+        public bool RememberMe { get; set; }
+    }
+}

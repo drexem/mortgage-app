@@ -1,0 +1,57 @@
+.page {
+    display: flex;
+    min-height: 100vh;
+}
+
+main {
+    flex: 1;
+    min-width: 0;
+}
+
+.sidebar {
+    position: sticky;
+    top: 0;
+    width: 230px;
+    height: 100vh;
+    flex: 0 0 230px;
+    background: #14271f;
+}
+
+.top-row {
+    display: flex;
+    height: 64px;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 2.5rem;
+    border-bottom: 1px solid #e2e8e3;
+    color: #68736d;
+    background: rgba(244, 246, 242, .92);
+}
+
+.top-label {
+    font-size: .78rem;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+}
+
+.user-email {
+    font-size: .82rem;
+}
+
+@media (max-width: 800px) {
+    .page {
+        flex-direction: column;
+    }
+
+    .sidebar {
+        position: relative;
+        width: 100%;
+        height: auto;
+        flex-basis: auto;
+    }
+
+    .top-row {
+        display: none;
+    }
+}

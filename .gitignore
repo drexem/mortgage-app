@@ -1,0 +1,6 @@
+.idea/
+**/bin/
+**/obj/
+MortgageApp/Data/*.db
+MortgageApp/Data/*.db-shm
+MortgageApp/Data/*.db-wal

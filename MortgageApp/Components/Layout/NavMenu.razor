@@ -1,0 +1,47 @@
+<div class="nav-brand">
+    <a class="brand" href="">Finančný plán</a>
+    <span>Peniaze pod kontrolou</span>
+</div>
+
+<input type="checkbox" title="Navigácia" class="navbar-toggler" />
+
+<div class="nav-scrollable" onclick="document.querySelector('.navbar-toggler').click()">
+    <nav class="nav flex-column">
+        <div class="nav-item">
+            <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
+                <span class="nav-icon">D</span> Prehľad
+            </NavLink>
+        </div>
+
+        <div class="nav-item">
+            <NavLink class="nav-link" href="sporenie">
+                <span class="nav-icon">%</span> Sporenie
+            </NavLink>
+        </div>
+
+        <div class="nav-item">
+            <NavLink class="nav-link" href="hypoteka">
+                <span class="nav-icon">H</span> Hypotéka
+            </NavLink>
+        </div>
+
+        <div class="nav-item">
+            <NavLink class="nav-link" href="nastavenia">
+                <span class="nav-icon">N</span> Nastavenia
+            </NavLink>
+        </div>
+
+        <AuthorizeView>
+            <Authorized>
+                <div class="nav-item nav-logout">
+                    <form action="Account/Logout" method="post">
+                        <AntiforgeryToken />
+                        <button class="nav-link" type="submit">
+                            <span class="nav-icon">→</span> Odhlásiť sa
+                        </button>
+                    </form>
+                </div>
+            </Authorized>
+        </AuthorizeView>
+    </nav>
+</div>

@@ -1,0 +1,83 @@
+@page "/Account/Register"
+
+@inject UserManager<ApplicationUser> UserManager
+@inject SignInManager<ApplicationUser> SignInManager
+@inject ILogger<Register> Logger
+@inject IdentityRedirectManager RedirectManager
+
+<PageTitle>Registrácia</PageTitle>
+
+<div class="auth-shell">
+    <div class="auth-card">
+        <a class="brand brand-dark" href="/">Finančný plán</a>
+        <p class="eyebrow">Začíname</p>
+        <h1>Vytvor si účet</h1>
+        <p class="muted">Dáta sa uložia oddelene pod tvojím účtom.</p>
+
+        @if (identityErrors.Count > 0)
+        {
+            <div class="alert alert-danger">@string.Join(" ", identityErrors)</div>
+        }
+
+        <EditForm Model="Input" method="post" OnValidSubmit="RegisterUser" FormName="register">
+            <DataAnnotationsValidator />
+            <ValidationSummary class="text-danger" />
+
+            <label class="field-label" for="register-email">E-mail</label>
+            <InputText id="register-email" class="form-control" @bind-Value="Input.Email" autocomplete="username" />
+
+            <label class="field-label" for="register-password">Heslo</label>
+            <InputText id="register-password" type="password" class="form-control" @bind-Value="Input.Password" autocomplete="new-password" />
+
+            <label class="field-label" for="register-confirm">Potvrdenie hesla</label>
+            <InputText id="register-confirm" type="password" class="form-control" @bind-Value="Input.ConfirmPassword" autocomplete="new-password" />
+
+            <button class="btn btn-primary w-100 mt-3" type="submit">Vytvoriť účet</button>
+        </EditForm>
+
+        <p class="auth-switch">Už máš účet? <a href="Account/Login">Prihlás sa</a></p>
+    </div>
+</div>
+
+@code {
+    private readonly List<string> identityErrors = [];
+
+    [SupplyParameterFromForm]
+    private RegisterInput Input { get; set; } = default!;
+
+    protected override void OnInitialized()
+    {
+        Input ??= new();
+    }
+
+    private async Task RegisterUser()
+    {
+        identityErrors.Clear();
+        var user = new ApplicationUser { UserName = Input.Email, Email = Input.Email };
+        var result = await UserManager.CreateAsync(user, Input.Password);
+
+        if (!result.Succeeded)
+        {
+            identityErrors.AddRange(result.Errors.Select(x => x.Description));
+            return;
+        }
+
+        Logger.LogInformation("User created a new account.");
+        await SignInManager.SignInAsync(user, isPersistent: false);
+        RedirectManager.RedirectTo("/");
+    }
+
+    private sealed class RegisterInput
+    {
+        [Required(ErrorMessage = "Zadaj e-mail.")]
+        [EmailAddress(ErrorMessage = "Zadaj platný e-mail.")]
+        public string Email { get; set; } = "";
+
+        [Required(ErrorMessage = "Zadaj heslo.")]
+        [StringLength(100, MinimumLength = 8, ErrorMessage = "Heslo musí mať aspoň 8 znakov.")]
+        public string Password { get; set; } = "";
+
+        [Compare(nameof(Password), ErrorMessage = "Heslá sa nezhodujú.")]
+        public string ConfirmPassword { get; set; } = "";
+    }
+}
