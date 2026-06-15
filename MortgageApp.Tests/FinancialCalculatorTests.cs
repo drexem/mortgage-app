@@ -626,6 +626,91 @@ public class FinancialCalculatorTests
     }
 
     [Fact]
+    public void CalculateCurrentPositions_AddThreeMonthsSinceConfirmedSnapshots()
+    {
+        var entries = new[]
+        {
+            new CashFlowEntry
+            {
+                Type = CashFlowType.Income,
+                MonthlyAmount = 100_000m,
+                IntervalMonths = 1,
+                FirstOccurrenceMonth = new DateTime(2026, 1, 1)
+            }
+        };
+        var accounts = new[]
+        {
+            new SavingsAccount
+            {
+                Id = 1,
+                Balance = 100_000m,
+                BalanceUpdatedAtUtc = new DateTime(2026, 6, 15),
+                InterestTaxPercent = 0,
+                RateTiers = [new SavingsRateTier { FromAmount = 0, ToAmount = null, BaseAnnualRate = 0 }]
+            }
+        };
+
+        var savings = FinancialCalculator.CalculateCurrentSavingsPosition(
+            entries,
+            accounts,
+            new DateTime(2026, 9, 15),
+            mortgagePlan: null,
+            savingsRatePercent: 50m,
+            investmentRatePercent: 50m);
+        var investments = FinancialCalculator.CalculateCurrentInvestmentPosition(
+            entries,
+            confirmedBalance: 50_000m,
+            confirmedAt: new DateTime(2026, 6, 15),
+            asOfDate: new DateTime(2026, 9, 15),
+            mortgagePlan: null,
+            savingsRatePercent: 50m,
+            investmentRatePercent: 50m);
+
+        Assert.Equal(100_000m, savings.ConfirmedBalance);
+        Assert.Equal(150_000m, savings.CalculatedDeposits);
+        Assert.Equal(250_000m, savings.EstimatedCurrentBalance);
+        Assert.Equal(50_000m, investments.ConfirmedBalance);
+        Assert.Equal(150_000m, investments.CalculatedDeposits);
+        Assert.Equal(200_000m, investments.EstimatedCurrentBalance);
+    }
+
+    [Fact]
+    public void CalculateCurrentPositions_DoNotAddCurrentMonthImmediatelyAfterConfirmation()
+    {
+        var entries = new[]
+        {
+            new CashFlowEntry
+            {
+                Type = CashFlowType.Income,
+                MonthlyAmount = 100_000m,
+                IntervalMonths = 1,
+                FirstOccurrenceMonth = new DateTime(2026, 1, 1)
+            }
+        };
+        var accounts = new[]
+        {
+            new SavingsAccount
+            {
+                Id = 1,
+                Balance = 100_000m,
+                BalanceUpdatedAtUtc = new DateTime(2026, 6, 1),
+                RateTiers = [new SavingsRateTier { FromAmount = 0, ToAmount = null, BaseAnnualRate = 0 }]
+            }
+        };
+
+        var savings = FinancialCalculator.CalculateCurrentSavingsPosition(
+            entries,
+            accounts,
+            new DateTime(2026, 6, 30),
+            mortgagePlan: null,
+            savingsRatePercent: 50m,
+            investmentRatePercent: 50m);
+
+        Assert.Equal(100_000m, savings.EstimatedCurrentBalance);
+        Assert.Equal(0m, savings.CalculatedDeposits);
+    }
+
+    [Fact]
     public void ProjectFinancialPosition_CalculatesInterestBeforePlannedMonthlyDeposit()
     {
         var entries = new[]

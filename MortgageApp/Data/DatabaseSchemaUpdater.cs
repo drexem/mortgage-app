@@ -16,6 +16,11 @@ public static class DatabaseSchemaUpdater
             await ExecuteAsync(connection, "ALTER TABLE SavingsAccounts ADD COLUMN BankName TEXT NOT NULL DEFAULT ''");
         }
 
+        if (!savingsColumns.ContainsKey("BalanceUpdatedAtUtc"))
+        {
+            await ExecuteAsync(connection, "ALTER TABLE SavingsAccounts ADD COLUMN BalanceUpdatedAtUtc TEXT NULL");
+        }
+
         if (savingsColumns.ContainsKey("MonthlyContribution"))
         {
             await RebuildSavingsAccountsAsync(connection);
@@ -37,6 +42,11 @@ public static class DatabaseSchemaUpdater
             await ExecuteAsync(connection, "ALTER TABLE AspNetUsers ADD COLUMN InvestmentBalance TEXT NOT NULL DEFAULT '0.0'");
         }
 
+        if (!userColumns.ContainsKey("InvestmentBalanceUpdatedAtUtc"))
+        {
+            await ExecuteAsync(connection, "ALTER TABLE AspNetUsers ADD COLUMN InvestmentBalanceUpdatedAtUtc TEXT NULL");
+        }
+
         var cashFlowColumns = await GetColumnsAsync(connection, "CashFlowEntries");
         if (!cashFlowColumns.ContainsKey("IntervalMonths"))
         {
@@ -46,6 +56,11 @@ public static class DatabaseSchemaUpdater
         if (!cashFlowColumns.ContainsKey("FirstOccurrenceMonth"))
         {
             await ExecuteAsync(connection, "ALTER TABLE CashFlowEntries ADD COLUMN FirstOccurrenceMonth TEXT NOT NULL DEFAULT '2000-01-01 00:00:00'");
+        }
+
+        if (!cashFlowColumns.ContainsKey("IsMortgageRelated"))
+        {
+            await ExecuteAsync(connection, "ALTER TABLE CashFlowEntries ADD COLUMN IsMortgageRelated INTEGER NOT NULL DEFAULT 0");
         }
 
         cashFlowColumns = await GetColumnsAsync(connection, "CashFlowEntries");
@@ -75,15 +90,16 @@ public static class DatabaseSchemaUpdater
                     Name TEXT NOT NULL,
                     MonthlyAmount TEXT NOT NULL,
                     Type INTEGER NOT NULL,
+                    IsMortgageRelated INTEGER NOT NULL,
                     IntervalMonths INTEGER NULL,
                     FirstOccurrenceMonth TEXT NOT NULL
                 )
                 """, transaction);
             await ExecuteAsync(connection, """
                 INSERT INTO CashFlowEntries_New
-                    (Id, UserId, Name, MonthlyAmount, Type, IntervalMonths, FirstOccurrenceMonth)
+                    (Id, UserId, Name, MonthlyAmount, Type, IsMortgageRelated, IntervalMonths, FirstOccurrenceMonth)
                 SELECT
-                    Id, UserId, Name, MonthlyAmount, Type, IntervalMonths, FirstOccurrenceMonth
+                    Id, UserId, Name, MonthlyAmount, Type, IsMortgageRelated, IntervalMonths, FirstOccurrenceMonth
                 FROM CashFlowEntries
                 """, transaction);
             await ExecuteAsync(connection, "DROP TABLE CashFlowEntries", transaction);
@@ -116,6 +132,7 @@ public static class DatabaseSchemaUpdater
                     Name TEXT NOT NULL,
                     BankName TEXT NOT NULL,
                     Balance TEXT NOT NULL,
+                    BalanceUpdatedAtUtc TEXT NULL,
                     InterestTaxPercent TEXT NOT NULL,
                     MeetsBonusConditions INTEGER NOT NULL,
                     UpdatedAtUtc TEXT NOT NULL
@@ -123,9 +140,9 @@ public static class DatabaseSchemaUpdater
                 """, transaction);
             await ExecuteAsync(connection, """
                 INSERT INTO SavingsAccounts_New
-                    (Id, UserId, Name, BankName, Balance, InterestTaxPercent, MeetsBonusConditions, UpdatedAtUtc)
+                    (Id, UserId, Name, BankName, Balance, BalanceUpdatedAtUtc, InterestTaxPercent, MeetsBonusConditions, UpdatedAtUtc)
                 SELECT
-                    Id, UserId, Name, BankName, Balance, InterestTaxPercent, MeetsBonusConditions, UpdatedAtUtc
+                    Id, UserId, Name, BankName, Balance, BalanceUpdatedAtUtc, InterestTaxPercent, MeetsBonusConditions, UpdatedAtUtc
                 FROM SavingsAccounts
                 """, transaction);
             await ExecuteAsync(connection, "DROP TABLE SavingsAccounts", transaction);

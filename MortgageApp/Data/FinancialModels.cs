@@ -23,6 +23,8 @@ public class CashFlowEntry
 
     public CashFlowType Type { get; set; }
 
+    public bool IsMortgageRelated { get; set; }
+
     [Range(1, 120)]
     public int? IntervalMonths { get; set; }
 
@@ -45,6 +47,8 @@ public class SavingsAccount
 
     [Range(0, double.MaxValue)]
     public decimal Balance { get; set; }
+
+    public DateTime? BalanceUpdatedAtUtc { get; set; }
 
     [Range(0, 100)]
     public decimal InterestTaxPercent { get; set; } = 15m;

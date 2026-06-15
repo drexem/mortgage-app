@@ -3,7 +3,9 @@
 Webová aplikácia na evidenciu pravidelných aj variabilných príjmov, výdavkov,
 viacerých sporiacich účtov, investícií a plánovanej hypotéky. Zvolené percento
 kladného mesačného prebytku automaticky rozdeľuje medzi sporenie a investície.
-Používateľ môže nastaviť aj aktuálny zostatok investícií.
+Používateľ môže manuálne potvrdiť aktuálne zostatky sporiacich účtov aj investícií.
+Pri každom načítaní aplikácia od posledného potvrdenia dopočíta očakávaný stav
+k dnešnému dňu podľa cash flow a následné prognózy začína z tohto stavu.
 Nové vklady do sporenia posiela do dostupných pásiem podľa najvýhodnejšej čistej
 úrokovej sadzby. Investície sa v odhadoch počítajú bez výnosu. Predvolene ide
 `100 %` prebytku do sporenia a `0 %` do investícií.
@@ -69,6 +71,7 @@ dotnet run --project MortgageApp
 2. Klikni na vytvorenie nového účtu.
 3. Zaregistruj sa pomocou e-mailu a hesla.
 4. Pridaj príjmy, výdavky, sporiace účty a údaje hypotéky.
+5. Potvrď reálne zostatky sporiacich účtov a investícií.
 
 Pri príjmoch a výdavkoch nastavuješ sumu pri jednom pripísaní a prvý mesiac.
 Periodicita v mesiacoch je voliteľná. Prázdna periodicita znamená jednorazovú
@@ -106,6 +109,7 @@ Testy overujú najmä:
 - pásmové úročenie sporiacich účtov,
 - optimalizované rozdelenie zvoleného percenta mesačného prebytku,
 - rozdelenie prebytku medzi sporiace účty a investície bez výnosu,
+- dopočet očakávaného dnešného stavu od posledných manuálne potvrdených zostatkov,
 - projekciu variabilných príjmov, bonusov a výdavkov na 12 mesiacov,
 - automatické započítanie hypotekárnej splátky do cash flow od dátumu prvej splátky,
 - odpočítanie spoločného mesačného vkladu do sporenia od disponibilného cash flow,
@@ -138,5 +142,7 @@ dotnet build --configuration Release
 - Pri zápornom mesačnom cash flow sa do sporenia ani investícií neposiela nič.
 - Presun do sporenia alebo investícií znižuje disponibilné peniaze, ale nie celkový majetok.
 - Odhad k dátumu zobrazuje sporiace účty, aktuálny zostatok investícií, budúce investičné vklady, hotovosť mimo sporenia, úroky a ich súčet.
+- Manuálne potvrdený zostatok je snapshot k času potvrdenia. Od nasledujúceho mesiaca aplikácia pri načítaní dopočíta plánované vklady; pri sporení dopočíta aj úroky.
+- Budúce prognózy začínajú z očakávaného aktuálneho stavu, nie zo starého manuálneho snapshotu.
 - Koláčový graf v odhade porovnáva zostatok sporiacich účtov s investovanou sumou.
 - Projekcia počíta mesačný úrok zo zostatku na začiatku mesiaca a plánovaný vklad pridá na konci mesiaca.

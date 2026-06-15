@@ -21,6 +21,7 @@ public class FinancialDataService(IDbContextFactory<ApplicationDbContext> dbFact
         var account = new SavingsAccount
         {
             UserId = userId,
+            BalanceUpdatedAtUtc = DateTime.UtcNow,
             RateTiers =
             [
                 new SavingsRateTier

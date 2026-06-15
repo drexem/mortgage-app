@@ -21,406 +21,233 @@ else
     <header class="page-heading">
         <div>
             <p class="eyebrow">Dashboard</p>
-            <h1>Tvoj mesačný prehľad</h1>
-            <p class="muted">Pravidelný plat, kvartálne bonusy, výdavky, úspory a hypotéka na jednom mieste.</p>
+            <h1>Financie bez zbytočností</h1>
+            <p class="muted">Aktuálny odhad a vývoj pri nastavenom cashflow.</p>
         </div>
-        <span class="date-chip">@MonthName(DateTime.Today)</span>
+        <span class="date-chip">@DateTime.Today.ToString("d. M. yyyy", culture)</span>
     </header>
 
-    <section class="summary-grid">
-        <article class="summary-card">
-            <span>Príjem tento mesiac</span>
-            <strong>@Money(monthlyIncome)</strong>
-            <small>@CurrentMonthIncomeCount príjmových položiek</small>
+    <section class="dashboard-hero-grid">
+        <article class="panel today-position">
+            <div class="panel-header">
+                <div>
+                    <p class="eyebrow">Predpokladané financie k dnešnému dňu</p>
+                    <h2>Sporenie a investície</h2>
+                </div>
+                <strong class="hero-total">@Money(ExpectedTodayTotal)</strong>
+            </div>
+            <div class="today-position-content">
+                <div class="interactive-pie large-portfolio-pie">
+                    <svg viewBox="0 0 100 100">
+                        <circle class="pie-track" cx="50" cy="50" r="38"></circle>
+                        <circle class="pie-segment savings-segment" cx="50" cy="50" r="38" pathLength="100"
+                                stroke-dasharray="@PieDash(SavingsTodayShare)" stroke-dashoffset="0"
+                                @onmouseenter='() => SetTodayPieInfo("Sporenie", currentSavingsPosition.EstimatedCurrentBalance, SavingsTodayShare)'
+                                @onmouseleave="ClearTodayPieInfo"><title>Sporenie: @Money(currentSavingsPosition.EstimatedCurrentBalance)</title></circle>
+                        <circle class="pie-segment investment-segment" cx="50" cy="50" r="38" pathLength="100"
+                                stroke-dasharray="@PieDash(InvestmentTodayShare)" stroke-dashoffset="@PieOffset(SavingsTodayShare)"
+                                @onmouseenter='() => SetTodayPieInfo("Investície", currentInvestmentPosition.EstimatedCurrentBalance, InvestmentTodayShare)'
+                                @onmouseleave="ClearTodayPieInfo"><title>Investície: @Money(currentInvestmentPosition.EstimatedCurrentBalance)</title></circle>
+                    </svg>
+                    <span>@todayPieLabel<small>@todayPieDetail</small></span>
+                </div>
+                <div class="today-balances">
+                    <a href="sporenie">
+                        <i class="savings-swatch"></i>
+                        <span>Sporenie<small>potvrdené + dopočítané</small></span>
+                        <strong>@Money(currentSavingsPosition.EstimatedCurrentBalance)</strong>
+                    </a>
+                    <a href="investicie">
+                        <i class="investment-swatch"></i>
+                        <span>Investície<small>bez predpokladaného výnosu</small></span>
+                        <strong>@Money(currentInvestmentPosition.EstimatedCurrentBalance)</strong>
+                    </a>
+                </div>
+            </div>
         </article>
-        <article class="summary-card">
-            <span>Priemerný príjem</span>
-            <strong>@Money(averageMonthlyIncome)</strong>
-            <small>priemer najbližších 12 mesiacov</small>
-        </article>
-        <article class="summary-card">
-            <span>Výdavky tento mesiac</span>
-            <strong>@Money(monthlyExpenses)</strong>
-            <small>@CurrentMonthExpenseCount výdavkových položiek</small>
-        </article>
-        <article class="summary-card">
-            <span>Plánované odkladanie</span>
-            <strong>@Money(monthlySavingsContribution + monthlyInvestmentContribution)</strong>
-            <small>@Money(monthlySavingsContribution) sporenie · @Money(monthlyInvestmentContribution) investície</small>
-        </article>
-        <article class="summary-card accent-card">
-            <span>Voľné po odložení</span>
-            <strong>@Money(monthlyFree)</strong>
-            <small>@Money(monthlyFreeBeforeSavings) pred odložením</small>
+
+        <article class="panel cashflow-widget">
+            <div class="panel-header">
+                <div>
+                    <p class="eyebrow">Cash flow tento mesiac</p>
+                    <h2>@MonthName(DateTime.Today)</h2>
+                </div>
+                <a class="gear-link" title="Nastaviť príjmy a výdavky" href="cashflow">⚙</a>
+            </div>
+            <div class="cashflow-widget-total @(monthlyFreeBeforeAllocation >= 0 ? "income-text" : "expense-text")">
+                @Money(monthlyFreeBeforeAllocation)
+                <small>prebytok pred rozdelením</small>
+            </div>
+            <div class="widget-stats">
+                <span>Príjmy <strong class="income-text">+ @Money(monthlyIncome)</strong></span>
+                <span>Výdavky <strong class="expense-text">- @Money(monthlyExpenses)</strong></span>
+                <span>Po rozdelení ostane cash <strong>@Money(monthlyCash)</strong></span>
+            </div>
+            <a class="text-link" href="cashflow">Spravovať príjmy a výdavky →</a>
         </article>
     </section>
 
-    <section class="cashflow-planning-grid">
-        <article class="panel">
-            <div class="panel-header">
-                <div>
-                    <p class="eyebrow">Plán odkladania</p>
-                    <h2>Ako rozdeliť kladný prebytok</h2>
-                </div>
-            </div>
-            <div class="planning-control">
-                <div class="field">
-                    <label>Na sporiace účty (%)</label>
-                    <input type="number" min="0" max="100" step="1" class="form-control"
-                           @bind="SavingsRateInput" @bind:event="oninput" />
-                </div>
-                <div class="field">
-                    <label>Do investícií (%)</label>
-                    <input type="number" min="0" max="100" step="1" class="form-control"
-                           @bind="InvestmentRateInput" @bind:event="oninput" />
-                </div>
-                <div class="field">
-                    <label>Aktuálne v investíciách</label>
-                    <input type="number" min="0" step="100" class="form-control" @bind="currentInvestmentBalance" />
-                </div>
-                <button class="btn btn-primary" type="button" @onclick="SaveSavingsRateAsync">Uložiť rozdelenie</button>
-            </div>
-            <p class="muted planning-help">Súčet je vždy 100 %. Pri zmene jedného percenta sa druhé automaticky dopočíta. Investície sa počítajú bez zisku a nové vklady do sporenia idú vždy do najvýhodnejšieho dostupného pásma.</p>
-        </article>
-
-        <article class="panel target-estimate">
+    <section class="panel allocation-widget">
+        <div class="panel-header">
             <div>
-                <p class="eyebrow">Odhad k dátumu</p>
-                <h2>Celkové dostupné peniaze</h2>
+                <p class="eyebrow">Aktuálne nastavenie sporenia</p>
+                <h2>Rozdelenie kladného mesačného prebytku</h2>
             </div>
-            <InputDate class="form-control" @bind-Value="freeCashTargetDate" />
-            <strong class="@(PositionForecast.TotalAvailable >= 0 ? "income-text" : "expense-text")">@Money(PositionForecast.TotalAvailable)</strong>
-            <div class="forecast-breakdown">
-                <span>Na sporiacich účtoch <strong>@Money(PositionForecast.SavingsBalance)</strong></span>
-                <span>Investované <strong>@Money(PositionForecast.InvestmentBalance)</strong></span>
-                <span>Hotovosť mimo sporenia <strong>@Money(PositionForecast.CashOutsideSavings)</strong></span>
-                <span>Z toho odhad úrokov <strong>@Money(PositionForecast.NetInterest)</strong></span>
+            <button class="gear-button" title="Upraviť rozdelenie" type="button" @onclick="OpenAllocationModal">⚙</button>
+        </div>
+        <div class="allocation-widget-content">
+            <div class="interactive-pie allocation-pie">
+                <svg viewBox="0 0 100 100">
+                    <circle class="pie-track" cx="50" cy="50" r="38"></circle>
+                    <circle class="pie-segment savings-segment" cx="50" cy="50" r="38" pathLength="100" stroke-dasharray="@PieDash(savingsRatePercent)" stroke-dashoffset="0"
+                            @onmouseenter='() => SetAllocationPieInfo("Sporenie", savingsRatePercent)' @onmouseleave="ClearAllocationPieInfo"><title>Sporenie: @savingsRatePercent.ToString("N0") %</title></circle>
+                    <circle class="pie-segment investment-segment" cx="50" cy="50" r="38" pathLength="100" stroke-dasharray="@PieDash(investmentRatePercent)" stroke-dashoffset="@PieOffset(savingsRatePercent)"
+                            @onmouseenter='() => SetAllocationPieInfo("Investície", investmentRatePercent)' @onmouseleave="ClearAllocationPieInfo"><title>Investície: @investmentRatePercent.ToString("N0") %</title></circle>
+                    <circle class="pie-segment cash-segment" cx="50" cy="50" r="38" pathLength="100" stroke-dasharray="@PieDash(CashRatePercent)" stroke-dashoffset="@PieOffset(savingsRatePercent + investmentRatePercent)"
+                            @onmouseenter='() => SetAllocationPieInfo("Cash", CashRatePercent)' @onmouseleave="ClearAllocationPieInfo"><title>Cash: @CashRatePercent.ToString("N0") %</title></circle>
+                </svg>
+                <span>@allocationPieLabel<small>@allocationPieDetail</small></span>
             </div>
-            <div class="forecast-chart">
-                <div class="portfolio-pie @(ForecastChartTotal == 0 ? "empty" : "")" style="@ForecastChartStyle">
-                    <span>@SavingsChartShare.ToString("N0") %</span>
-                </div>
-                <div class="chart-legend">
-                    <span><i class="savings-swatch"></i>Sporiace účty <strong>@Money(PositionForecast.SavingsBalance)</strong></span>
-                    <span><i class="investment-swatch"></i>Investície <strong>@Money(PositionForecast.InvestmentBalance)</strong></span>
-                </div>
+            <div class="allocation-cards">
+                <div><i class="savings-swatch"></i><span>Sporenie</span><strong>@savingsRatePercent.ToString("N0") %</strong><small>@Money(monthlySavingsContribution) tento mesiac</small></div>
+                <div><i class="investment-swatch"></i><span>Investície</span><strong>@investmentRatePercent.ToString("N0") %</strong><small>@Money(monthlyInvestmentContribution) tento mesiac</small></div>
+                <div><i class="cash-swatch"></i><span>Cash</span><strong>@CashRatePercent.ToString("N0") %</strong><small>@Money(monthlyCash) tento mesiac</small></div>
             </div>
-            <small>odhad zahŕňa aktuálne sporiace účty, budúce príjmy, výdavky, hypotéku, vklady, investície bez výnosu a úroky</small>
-        </article>
-    </section>
-
-    <section class="dashboard-grid">
-        <article class="panel cashflow-panel">
-            <div class="panel-header">
-                <div>
-                    <p class="eyebrow">Cash flow</p>
-                    <h2>Príjmy a výdavky</h2>
-                </div>
-                <span class="balance-pill @(monthlyFree >= 0 ? "positive" : "negative")">@Money(monthlyFree)</span>
-            </div>
-
-            <EditForm Model="newEntry" OnValidSubmit="AddEntryAsync" class="cashflow-form">
-                <DataAnnotationsValidator />
-                <div class="field">
-                    <label>Názov</label>
-                    <InputText class="form-control" @bind-Value="newEntry.Name" placeholder="Plat alebo kvartálny bonus" />
-                </div>
-                <div class="field">
-                    <label>Suma pri každom pripísaní</label>
-                    <InputNumber class="form-control" @bind-Value="newEntry.MonthlyAmount" />
-                </div>
-                <div class="field">
-                    <label>Typ</label>
-                    <InputSelect class="form-select" @bind-Value="newEntry.Type">
-                        <option value="@CashFlowType.Income">Príjem</option>
-                        <option value="@CashFlowType.Expense">Výdavok</option>
-                    </InputSelect>
-                </div>
-                <div class="field">
-                    <label>Opakovať každých X mesiacov (voliteľné)</label>
-                    <InputNumber class="form-control" @bind-Value="newEntry.IntervalMonths" placeholder="Jednorazová položka" />
-                </div>
-                <div class="field">
-                    <label>Prvý mesiac</label>
-                    <InputDate class="form-control" @bind-Value="newEntry.FirstOccurrenceMonth" />
-                </div>
-                <button class="btn btn-primary" type="submit">Pridať položku</button>
-            </EditForm>
-
-            <div class="frequency-help">
-                Pole opakovania nechaj prázdne pre jednorazovú položku. Mesačný plat nastav na
-                <strong>1</strong>, kvartálny bonus na <strong>3</strong>.
-            </div>
-            @if (!string.IsNullOrWhiteSpace(cashFlowError))
-            {
-                <div class="alert alert-danger">@cashFlowError</div>
-            }
-
-            @if (entries.Count == 0)
-            {
-                @if (mortgageResult.MonthlyPayment == 0 && monthlySavingsContribution == 0 && monthlyInvestmentContribution == 0)
-                {
-                    <div class="empty-state">Pridaj prvý pravidelný príjem alebo výdavok.</div>
-                }
-            }
-            @if (entries.Count > 0 || mortgageResult.MonthlyPayment > 0 || monthlySavingsContribution > 0 || monthlyInvestmentContribution > 0)
-            {
-                <div class="entry-list">
-                    @if (mortgageResult.MonthlyPayment > 0)
-                    {
-                        <div class="entry-row mortgage-entry">
-                            <span class="entry-dot expense-dot"></span>
-                            <div>
-                                <strong>Splátka hypotéky</strong>
-                                <small>Automatický výdavok · od @mortgage.FirstPaymentDate.ToString("d. M. yyyy")</small>
-                            </div>
-                            <span class="entry-amount">- @Money(mortgageResult.MonthlyPayment)</span>
-                            <a class="icon-link" title="Upraviť hypotéku" href="hypoteka">›</a>
-                        </div>
-                    }
-                    @if (monthlySavingsContribution > 0)
-                    {
-                        <div class="entry-row savings-entry">
-                            <span class="entry-dot savings-dot"></span>
-                            <div>
-                                <strong>Presun do sporenia</strong>
-                                <small>@savingsRatePercent.ToString("N0") % z prebytku · nie je to výdavok majetku</small>
-                            </div>
-                            <span class="entry-amount savings-text">- @Money(monthlySavingsContribution)</span>
-                            <a class="icon-link" title="Upraviť sporenie" href="sporenie">›</a>
-                        </div>
-                    }
-                    @if (monthlyInvestmentContribution > 0)
-                    {
-                        <div class="entry-row investment-entry">
-                            <span class="entry-dot investment-dot"></span>
-                            <div>
-                                <strong>Presun do investícií</strong>
-                                <small>@investmentRatePercent.ToString("N0") % z prebytku · projekcia bez výnosu</small>
-                            </div>
-                            <span class="entry-amount investment-text">- @Money(monthlyInvestmentContribution)</span>
-                            <span></span>
-                        </div>
-                    }
-                    @foreach (var entry in entries.OrderBy(x => x.Type).ThenByDescending(x => x.MonthlyAmount))
-                    {
-                        <div class="entry-row">
-                            <span class="entry-dot @(entry.Type == CashFlowType.Income ? "income-dot" : "expense-dot")"></span>
-                            <div>
-                                <strong>@entry.Name</strong>
-                                <small>@EntrySchedule(entry)</small>
-                            </div>
-                            <span class="entry-amount @(entry.Type == CashFlowType.Income ? "income-text" : "")">
-                                @(entry.Type == CashFlowType.Income ? "+" : "-") @Money(entry.MonthlyAmount)
-                            </span>
-                            <div class="entry-actions">
-                                <button class="icon-button edit-icon-button" title="Upraviť" @onclick="() => BeginEdit(entry)">&#9998;</button>
-                                <button class="icon-button" title="Odstrániť" @onclick="() => DeleteEntryAsync(entry.Id)">×</button>
-                            </div>
-                        </div>
-                        @if (editingEntry?.Id == entry.Id)
-                        {
-                            var editEntry = editingEntry;
-                            <EditForm Model="editEntry" OnValidSubmit="SaveEntryAsync" class="cashflow-form entry-edit-form">
-                                <DataAnnotationsValidator />
-                                <div class="field">
-                                    <label>Názov</label>
-                                    <InputText class="form-control" @bind-Value="editEntry.Name" />
-                                </div>
-                                <div class="field">
-                                    <label>Suma pri každom pripísaní</label>
-                                    <InputNumber class="form-control" @bind-Value="editEntry.MonthlyAmount" />
-                                </div>
-                                <div class="field">
-                                    <label>Typ</label>
-                                    <InputSelect class="form-select" @bind-Value="editEntry.Type">
-                                        <option value="@CashFlowType.Income">Príjem</option>
-                                        <option value="@CashFlowType.Expense">Výdavok</option>
-                                    </InputSelect>
-                                </div>
-                                <div class="field">
-                                    <label>Opakovať každých X mesiacov</label>
-                                    <InputNumber class="form-control" @bind-Value="editEntry.IntervalMonths" placeholder="Jednorazová položka" />
-                                </div>
-                                <div class="field">
-                                    <label>Prvý mesiac</label>
-                                    <InputDate class="form-control" @bind-Value="editEntry.FirstOccurrenceMonth" />
-                                </div>
-                                <div class="entry-edit-actions">
-                                    <button class="btn btn-secondary btn-small" type="button" @onclick="CancelEdit">Zrušiť</button>
-                                    <button class="btn btn-primary btn-small" type="submit">Uložiť</button>
-                                </div>
-                            </EditForm>
-                        }
-                    }
-                </div>
-            }
-
-            <div class="panel-header projection-heading">
-                <div>
-                    <p class="eyebrow">Projekcia cash flow</p>
-                    <h2>Najbližších 12 mesiacov</h2>
-                </div>
-            </div>
-            <div class="frequency-help projection-help">
-                Počiatočný zostatok sporenia je <strong>@Money(totalSavings)</strong>.
-                Dostupné spolu = zostatok sporenia + investície + hotovosť mimo sporenia.
-                Mesačný úrok sa počíta zo zostatku na začiatku mesiaca.
-            </div>
-            <div class="cashflow-projection">
-                <div class="cashflow-projection-row cashflow-projection-head">
-                    <span>Mesiac</span>
-                    <span>Príjmy</span>
-                    <span>Výdavky</span>
-                    <span>Sporenie</span>
-                    <span>Investície</span>
-                    <span>Voľné</span>
-                    <span>Úrok</span>
-                    <span>Sporenie spolu</span>
-                    <span>Investície spolu</span>
-                    <span>Hotovosť spolu</span>
-                    <span>Dostupné spolu</span>
-                </div>
-                @for (var index = 0; index < cashFlowProjection.Count; index++)
-                {
-                    var row = cashFlowProjection[index];
-                    var position = financialPositionProjection[index];
-                    <div class="cashflow-projection-row">
-                        <span>@MonthName(row.Month)</span>
-                        <span class="income-text">+ @Money(row.Income)</span>
-                        <span class="expense-text">- @Money(row.Expenses)</span>
-                        <span class="savings-text">- @Money(row.SavingsContribution)</span>
-                        <span class="investment-text">- @Money(row.InvestmentContribution)</span>
-                        <strong class="@(row.FreeAmount >= 0 ? "income-text" : "expense-text")">@Money(row.FreeAmount)</strong>
-                        <span class="income-text">+ @Money(position.NetInterest)</span>
-                        <strong>@Money(position.SavingsBalance)</strong>
-                        <strong class="investment-text">@Money(position.InvestmentBalance)</strong>
-                        <strong>@Money(position.CashOutsideSavings)</strong>
-                        <strong class="total-position">@Money(position.TotalAvailable)</strong>
-                    </div>
-                }
-            </div>
-        </article>
-
-        <div class="stack">
-            <article class="panel">
-                <div class="panel-header">
-                    <div>
-                        <p class="eyebrow">Sporenie</p>
-                        <h2>Všetky sporiace účty</h2>
-                    </div>
-                    <a class="text-link" href="sporenie">Upraviť</a>
-                </div>
-                <div class="big-number">@Money(totalSavings)</div>
-                <div class="progress-track">
-                    <span style="width: @SavingsProgress%"></span>
-                </div>
-                <div class="split-stat">
-                    <span>Odhad úroku za 12 mesiacov</span>
-                    <strong>@Money(projectedInterest)</strong>
-                </div>
-                <div class="split-stat">
-                    <span>Odporúčaný účet pre ďalší vklad</span>
-                    <strong>@(nextSavingsAllocation?.AccountName ?? "Nenastavené")</strong>
-                </div>
-            </article>
-
-            <article class="panel">
-                <div class="panel-header">
-                    <div>
-                        <p class="eyebrow">Hypotéka</p>
-                        <h2>Plán kúpy nehnuteľnosti</h2>
-                    </div>
-                    <a class="text-link" href="hypoteka">Upraviť</a>
-                </div>
-                <div class="mortgage-highlight">
-                    <span>Odhadovaná splátka</span>
-                    <strong>@Money(mortgageResult.MonthlyPayment)</strong>
-                    <small>mesačne na @mortgage.TermYears rokov</small>
-                </div>
-                <div class="two-cols">
-                    <div><span>Výška úveru</span><strong>@Money(mortgageResult.Principal)</strong></div>
-                    <div><span>LTV</span><strong>@mortgageResult.LtvPercent.ToString("N1") %</strong></div>
-                </div>
-            </article>
         </div>
     </section>
+
+    <section class="panel development-panel">
+        <div class="panel-header">
+            <div>
+                <p class="eyebrow">Predpokladaný vývoj</p>
+                <h2>Najbližších 12 mesiacov</h2>
+            </div>
+            <span class="balance-pill positive">@Money(FinalProjectedTotal)</span>
+        </div>
+        <div class="development-chart">
+            <svg viewBox="0 0 1100 330" role="img" aria-label="Graf predpokladaného vývoja financií">
+                @foreach (var gridline in ChartGridlines)
+                {
+                    <line class="horizontal-gridline" x1="82" y1="@Svg(gridline.Y)" x2="1070" y2="@Svg(gridline.Y)"></line>
+                    <foreignObject class="axis-value-object" x="0" y="@Svg(gridline.Y - 9)" width="72" height="18">
+                        <div class="axis-value">@CompactMoney(gridline.Value)</div>
+                    </foreignObject>
+                }
+                @foreach (var point in ChartPoints)
+                {
+                    <line class="vertical-gridline" x1="@Svg(point.X)" y1="20" x2="@Svg(point.X)" y2="270"></line>
+                    <foreignObject x="@Svg(point.X - 35)" y="282" width="70" height="42">
+                        <div class="axis-month">@point.Month.ToString("MMM", culture)<small>@point.Month.Year</small></div>
+                    </foreignObject>
+                }
+                <polygon class="chart-area" points="@DevelopmentAreaPoints"></polygon>
+                <polyline class="chart-line" points="@DevelopmentChartPoints"></polyline>
+                @foreach (var point in ChartPoints)
+                {
+                    <circle class="chart-point" cx="@Svg(point.X)" cy="@Svg(point.Y)" r="6">
+                        <title>@MonthName(point.Month): @Money(point.Value)</title>
+                    </circle>
+                }
+            </svg>
+            <p class="chart-help">Prejdi kurzorom na bod pre presnú hodnotu daného mesiaca.</p>
+        </div>
+        <div class="monthly-calendar">
+            @for (var index = 0; index < financialPositionProjection.Count; index++)
+            {
+                var position = financialPositionProjection[index];
+                var cashflow = cashFlowProjection[index];
+                <article class="month-card">
+                    <header><span>@position.Month.ToString("MMM", culture)</span><small>@position.Month.Year</small></header>
+                    <strong>@Money(position.TotalAvailable)</strong>
+                    <div><span>Sporenie</span><b>@Money(position.SavingsBalance)</b></div>
+                    <div><span>Investície</span><b>@Money(position.InvestmentBalance)</b></div>
+                    <div><span>Cash</span><b>@Money(position.CashOutsideSavings)</b></div>
+                    <footer class="@(cashflow.FreeBeforeSavings >= 0 ? "income-text" : "expense-text")">
+                        Cashflow @Money(cashflow.FreeBeforeSavings)
+                    </footer>
+                </article>
+            }
+        </div>
+    </section>
+
+    @if (showAllocationModal)
+    {
+        <div class="modal-backdrop-custom" @onclick="CloseAllocationModal">
+            <section class="allocation-modal" @onclick:stopPropagation="true">
+                <div class="panel-header">
+                    <div><p class="eyebrow">Nastavenie</p><h2>Rozdelenie prebytku</h2></div>
+                    <button class="icon-button" type="button" @onclick="CloseAllocationModal">×</button>
+                </div>
+                <div class="interactive-pie allocation-pie modal-pie">
+                    <svg viewBox="0 0 100 100">
+                        <circle class="pie-track" cx="50" cy="50" r="38"></circle>
+                        <circle class="pie-segment savings-segment" cx="50" cy="50" r="38" pathLength="100" stroke-dasharray="@PieDash(draftSavingsRate)" stroke-dashoffset="0"><title>Sporenie: @draftSavingsRate.ToString("N0") %</title></circle>
+                        <circle class="pie-segment investment-segment" cx="50" cy="50" r="38" pathLength="100" stroke-dasharray="@PieDash(draftInvestmentRate)" stroke-dashoffset="@PieOffset(draftSavingsRate)"><title>Investície: @draftInvestmentRate.ToString("N0") %</title></circle>
+                        <circle class="pie-segment cash-segment" cx="50" cy="50" r="38" pathLength="100" stroke-dasharray="@PieDash(DraftCashRate)" stroke-dashoffset="@PieOffset(draftSavingsRate + draftInvestmentRate)"><title>Cash: @DraftCashRate.ToString("N0") %</title></circle>
+                    </svg>
+                    <span>@DraftCashRate.ToString("N0") %<small>cash</small></span>
+                </div>
+                <div class="modal-fields">
+                    <div class="field"><label>Sporenie (%)</label><input class="form-control" type="number" min="0" max="100" @bind="draftSavingsRate" /></div>
+                    <div class="field"><label>Investície (%)</label><input class="form-control" type="number" min="0" max="100" @bind="draftInvestmentRate" /></div>
+                    <div class="field"><label>Cash (%)</label><input class="form-control" value="@DraftCashRate.ToString("N0")" disabled /></div>
+                </div>
+                @if (!string.IsNullOrWhiteSpace(allocationError))
+                {
+                    <div class="alert alert-danger">@allocationError</div>
+                }
+                <p class="muted planning-help">Cash je zvyšok do 100 %. Investície sa v prognóze počítajú bez výnosu.</p>
+                <div class="modal-actions">
+                    <button class="btn btn-secondary" type="button" @onclick="CloseAllocationModal">Zrušiť</button>
+                    <button class="btn btn-primary" type="button" @onclick="SaveAllocationAsync">Uložiť rozdelenie</button>
+                </div>
+            </section>
+        </div>
+    }
 }
 
 @code {
     private readonly CultureInfo culture = CultureInfo.GetCultureInfo("sk-SK");
     private readonly List<CashFlowEntry> entries = [];
-    private CashFlowEntry newEntry = CreateNewEntry();
     private IReadOnlyList<CashFlowProjectionRow> cashFlowProjection = [];
     private IReadOnlyList<FinancialPositionProjectionRow> financialPositionProjection = [];
-    private List<SavingsAccount> savingsAccounts = [];
-    private MortgagePlan mortgage = new();
-    private MortgageResult mortgageResult = new(0, 0, 0, 0);
+    private CurrentSavingsPosition currentSavingsPosition = new(DateTime.Today, 0, 0, 0, 0, new Dictionary<int, decimal>());
+    private CurrentInvestmentPosition currentInvestmentPosition = new(null, 0, 0, 0);
     private string userId = "";
     private string currency = "CZK";
-    private string? cashFlowError;
-    private CashFlowEntry? editingEntry;
     private bool loading = true;
-    private decimal monthlyIncome;
-    private decimal averageMonthlyIncome;
-    private decimal monthlyExpenses;
-    private decimal monthlyFreeBeforeSavings;
-    private decimal monthlyFree;
-    private decimal projectedInterest;
-    private decimal totalSavings;
-    private decimal savingsRatePercent = 100m;
+    private bool showAllocationModal;
+    private string? allocationError;
+    private decimal savingsRatePercent;
     private decimal investmentRatePercent;
-    private decimal currentInvestmentBalance;
+    private decimal draftSavingsRate;
+    private decimal draftInvestmentRate;
+    private decimal monthlyIncome;
+    private decimal monthlyExpenses;
+    private decimal monthlyFreeBeforeAllocation;
     private decimal monthlySavingsContribution;
     private decimal monthlyInvestmentContribution;
-    private SavingsAllocation? nextSavingsAllocation;
-    private DateTime freeCashTargetDate = DateTime.Today.AddMonths(12);
+    private decimal monthlyCash;
+    private string todayPieLabel = "Spolu";
+    private string todayPieDetail = "";
+    private string allocationPieLabel = "100 %";
+    private string allocationPieDetail = "prebytok";
 
-    private int CurrentMonthIncomeCount => entries.Count(x =>
-        x.Type == CashFlowType.Income && FinancialCalculator.OccursInMonth(x, DateTime.Today));
-    private int CurrentMonthExpenseCount =>
-        entries.Count(x => x.Type == CashFlowType.Expense && FinancialCalculator.OccursInMonth(x, DateTime.Today)) +
-        (FinancialCalculator.CalculateMortgagePaymentForMonth(mortgage, DateTime.Today) > 0 ? 1 : 0);
-    private decimal SavingsProgress => Math.Min(100m, totalSavings / 1_000_000m * 100m);
-    private FinancialPositionForecast PositionForecast => FinancialCalculator.ForecastFinancialPosition(
-        entries,
-        savingsAccounts,
-        DateTime.Today,
-        freeCashTargetDate,
-        mortgage,
-        savingsRatePercent,
-        investmentRatePercent,
-        currentInvestmentBalance);
-    private decimal ForecastChartTotal => PositionForecast.SavingsBalance + PositionForecast.InvestmentBalance;
-    private decimal SavingsRateInput
-    {
-        get => savingsRatePercent;
-        set
-        {
-            savingsRatePercent = Math.Clamp(value, 0m, 100m);
-            investmentRatePercent = 100m - savingsRatePercent;
-        }
-    }
-    private decimal InvestmentRateInput
-    {
-        get => investmentRatePercent;
-        set
-        {
-            investmentRatePercent = Math.Clamp(value, 0m, 100m);
-            savingsRatePercent = 100m - investmentRatePercent;
-        }
-    }
-    private decimal SavingsChartShare => ForecastChartTotal <= 0
-        ? 0
-        : PositionForecast.SavingsBalance / ForecastChartTotal * 100m;
-    private string ForecastChartStyle =>
-        $"--savings-share: {SavingsChartShare.ToString(CultureInfo.InvariantCulture)}%;";
+    private decimal ExpectedTodayTotal => currentSavingsPosition.EstimatedCurrentBalance + currentInvestmentPosition.EstimatedCurrentBalance;
+    private decimal SavingsTodayShare => ExpectedTodayTotal <= 0 ? 0 : currentSavingsPosition.EstimatedCurrentBalance / ExpectedTodayTotal * 100m;
+    private decimal InvestmentTodayShare => ExpectedTodayTotal <= 0 ? 0 : currentInvestmentPosition.EstimatedCurrentBalance / ExpectedTodayTotal * 100m;
+    private decimal CashRatePercent => Math.Max(0m, 100m - savingsRatePercent - investmentRatePercent);
+    private decimal DraftCashRate => Math.Max(0m, 100m - Math.Clamp(draftSavingsRate, 0m, 100m) - Math.Clamp(draftInvestmentRate, 0m, 100m));
+    private decimal FinalProjectedTotal => financialPositionProjection.LastOrDefault()?.TotalAvailable ?? ExpectedTodayTotal;
+    private string DevelopmentChartPoints => CreateChartPoints();
+    private string DevelopmentAreaPoints => $"82,270 {DevelopmentChartPoints} 1070,270";
+    private IReadOnlyList<ChartPoint> ChartPoints => CreateChartData();
+    private IReadOnlyList<ChartGridline> ChartGridlines => CreateGridlines();
 
     protected override async Task OnInitializedAsync()
     {
         var auth = await AuthenticationStateProvider.GetAuthenticationStateAsync();
         userId = auth.User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "";
-        newEntry.UserId = userId;
         await LoadAsync();
         loading = false;
     }
@@ -430,197 +257,133 @@ else
         await using var db = await DbFactory.CreateDbContextAsync();
         entries.Clear();
         entries.AddRange(await db.CashFlowEntries.Where(x => x.UserId == userId).ToListAsync());
-        var userSettings = await db.Users.Where(x => x.Id == userId)
-            .Select(x => new
-            {
-                x.PreferredCurrency,
-                x.SavingsRatePercent,
-                x.InvestmentRatePercent,
-                x.InvestmentBalance
-            })
-            .SingleAsync();
-        currency = userSettings.PreferredCurrency;
-        savingsRatePercent = userSettings.SavingsRatePercent;
-        investmentRatePercent = userSettings.InvestmentRatePercent;
-        currentInvestmentBalance = userSettings.InvestmentBalance;
-        savingsAccounts = await DataService.GetSavingsAccountsAsync(userId);
-        mortgage = await DataService.GetOrCreateMortgagePlanAsync(userId);
-
-        cashFlowProjection = FinancialCalculator.ProjectCashFlow(
-            entries,
-            DateTime.Today,
-            mortgage,
-            savingsRatePercent,
-            investmentRatePercent);
-        var currentMonth = cashFlowProjection.First();
-        monthlyIncome = currentMonth.Income;
-        monthlyExpenses = currentMonth.Expenses;
-        monthlyFreeBeforeSavings = currentMonth.FreeBeforeSavings;
-        monthlySavingsContribution = currentMonth.SavingsContribution;
-        monthlyInvestmentContribution = currentMonth.InvestmentContribution;
-        monthlyFree = currentMonth.FreeAmount;
-        averageMonthlyIncome = cashFlowProjection.Average(x => x.Income);
-
-        totalSavings = savingsAccounts.Sum(x => x.Balance);
-        nextSavingsAllocation = FinancialCalculator.PlanSavingsAllocation(savingsAccounts, 1m).Allocations.FirstOrDefault();
-        financialPositionProjection = FinancialCalculator.ProjectFinancialPosition(
-            entries,
-            savingsAccounts,
-            DateTime.Today,
-            mortgage,
-            savingsRatePercent,
-            investmentRatePercent,
-            currentInvestmentBalance);
-        projectedInterest = financialPositionProjection.Count == 0
-            ? 0
-            : financialPositionProjection[^1].CumulativeNetInterest;
-        mortgageResult = FinancialCalculator.CalculateMortgage(mortgage);
-    }
-
-    private async Task SaveSavingsRateAsync()
-    {
-        await using var db = await DbFactory.CreateDbContextAsync();
         var user = await db.Users.SingleAsync(x => x.Id == userId);
-        user.SavingsRatePercent = Math.Clamp(savingsRatePercent, 0m, 100m);
-        user.InvestmentRatePercent = 100m - user.SavingsRatePercent;
-        user.InvestmentBalance = Math.Max(0m, currentInvestmentBalance);
+        currency = user.PreferredCurrency;
         savingsRatePercent = user.SavingsRatePercent;
         investmentRatePercent = user.InvestmentRatePercent;
-        currentInvestmentBalance = user.InvestmentBalance;
+        var accounts = await DataService.GetSavingsAccountsAsync(userId);
+        var mortgage = await DataService.GetOrCreateMortgagePlanAsync(userId);
+
+        currentSavingsPosition = FinancialCalculator.CalculateCurrentSavingsPosition(entries, accounts, DateTime.Today, mortgage, savingsRatePercent, investmentRatePercent);
+        currentInvestmentPosition = FinancialCalculator.CalculateCurrentInvestmentPosition(entries, user.InvestmentBalance, user.InvestmentBalanceUpdatedAtUtc, DateTime.Today, mortgage, savingsRatePercent, investmentRatePercent);
+        var estimatedAccounts = CreateAccountsWithBalances(accounts, currentSavingsPosition.AccountBalances);
+        var currentMonth = FinancialCalculator.ProjectCashFlow(entries, DateTime.Today, mortgage, savingsRatePercent, investmentRatePercent, 1).First();
+        cashFlowProjection = FinancialCalculator.ProjectCashFlow(entries, DateTime.Today.AddMonths(1), mortgage, savingsRatePercent, investmentRatePercent);
+        financialPositionProjection = FinancialCalculator.ProjectFinancialPosition(entries, estimatedAccounts, DateTime.Today.AddMonths(1), mortgage, savingsRatePercent, investmentRatePercent, currentInvestmentPosition.EstimatedCurrentBalance);
+
+        monthlyIncome = currentMonth.Income;
+        monthlyExpenses = currentMonth.Expenses;
+        monthlyFreeBeforeAllocation = currentMonth.FreeBeforeSavings;
+        monthlySavingsContribution = currentMonth.SavingsContribution;
+        monthlyInvestmentContribution = currentMonth.InvestmentContribution;
+        monthlyCash = currentMonth.FreeAmount;
+        ClearTodayPieInfo();
+        ClearAllocationPieInfo();
+    }
+
+    private void OpenAllocationModal()
+    {
+        draftSavingsRate = savingsRatePercent;
+        draftInvestmentRate = investmentRatePercent;
+        allocationError = null;
+        showAllocationModal = true;
+    }
+
+    private void CloseAllocationModal() => showAllocationModal = false;
+
+    private void SetTodayPieInfo(string label, decimal value, decimal share)
+    {
+        todayPieLabel = label;
+        todayPieDetail = $"{share:N0} % · {Money(value)}";
+    }
+
+    private void ClearTodayPieInfo()
+    {
+        todayPieLabel = "Spolu";
+        todayPieDetail = Money(ExpectedTodayTotal);
+    }
+
+    private void SetAllocationPieInfo(string label, decimal share)
+    {
+        allocationPieLabel = label;
+        allocationPieDetail = $"{share:N0} %";
+    }
+
+    private void ClearAllocationPieInfo()
+    {
+        allocationPieLabel = "100 %";
+        allocationPieDetail = "prebytok";
+    }
+
+    private async Task SaveAllocationAsync()
+    {
+        draftSavingsRate = Math.Clamp(draftSavingsRate, 0m, 100m);
+        draftInvestmentRate = Math.Clamp(draftInvestmentRate, 0m, 100m);
+        if (draftSavingsRate + draftInvestmentRate > 100m)
+        {
+            allocationError = "Sporenie a investície môžu mať spolu najviac 100 %.";
+            return;
+        }
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var user = await db.Users.SingleAsync(x => x.Id == userId);
+        user.SavingsRatePercent = draftSavingsRate;
+        user.InvestmentRatePercent = draftInvestmentRate;
         await db.SaveChangesAsync();
+        showAllocationModal = false;
         await LoadAsync();
     }
 
-    private async Task AddEntryAsync()
+    private string CreateChartPoints()
     {
-        try
-        {
-            cashFlowError = null;
-            newEntry.FirstOccurrenceMonth = new DateTime(
-                newEntry.FirstOccurrenceMonth.Year,
-                newEntry.FirstOccurrenceMonth.Month,
-                1);
-            await using var db = await DbFactory.CreateDbContextAsync();
-            db.CashFlowEntries.Add(newEntry);
-            await db.SaveChangesAsync();
-            newEntry = CreateNewEntry();
-            newEntry.UserId = userId;
-            await LoadAsync();
-        }
-        catch (DbUpdateException)
-        {
-            cashFlowError = "Položku sa nepodarilo uložiť. Reštartuj aplikáciu a skús to znova.";
-        }
+        return string.Join(" ", ChartPoints.Select(point => $"{Svg(point.X)},{Svg(point.Y)}"));
     }
 
-    private async Task DeleteEntryAsync(int id)
+    private IReadOnlyList<ChartPoint> CreateChartData()
     {
-        await using var db = await DbFactory.CreateDbContextAsync();
-        var entry = await db.CashFlowEntries.SingleOrDefaultAsync(x => x.Id == id && x.UserId == userId);
-        if (entry is not null)
-        {
-            db.CashFlowEntries.Remove(entry);
-            await db.SaveChangesAsync();
-            if (editingEntry?.Id == id)
-            {
-                editingEntry = null;
-            }
-            await LoadAsync();
-        }
+        var values = new[] { ExpectedTodayTotal }.Concat(financialPositionProjection.Select(x => x.TotalAvailable)).ToArray();
+        var months = new[] { DateTime.Today }.Concat(financialPositionProjection.Select(x => x.Month)).ToArray();
+        var min = values.Min();
+        var max = values.Max();
+        var padding = Math.Max(10_000m, (max - min) * .12m);
+        var chartMin = Math.Max(0m, min - padding);
+        var chartMax = max + padding;
+        var range = Math.Max(1m, chartMax - chartMin);
+        return values.Select((value, index) => new ChartPoint(
+            months[index],
+            value,
+            82m + index * 988m / Math.Max(1, values.Length - 1),
+            270m - (value - chartMin) / range * 250m)).ToList();
     }
 
-    private void BeginEdit(CashFlowEntry entry)
+    private IReadOnlyList<ChartGridline> CreateGridlines()
     {
-        cashFlowError = null;
-        editingEntry = new CashFlowEntry
-        {
-            Id = entry.Id,
-            UserId = userId,
-            Name = entry.Name,
-            MonthlyAmount = entry.MonthlyAmount,
-            Type = entry.Type,
-            IntervalMonths = entry.IntervalMonths,
-            FirstOccurrenceMonth = entry.FirstOccurrenceMonth
-        };
+        var values = new[] { ExpectedTodayTotal }.Concat(financialPositionProjection.Select(x => x.TotalAvailable)).ToArray();
+        var min = values.Min();
+        var max = values.Max();
+        var padding = Math.Max(10_000m, (max - min) * .12m);
+        var chartMin = Math.Max(0m, min - padding);
+        var chartMax = max + padding;
+        return Enumerable.Range(0, 5)
+            .Select(index => new ChartGridline(20m + index * 62.5m, chartMax - index * (chartMax - chartMin) / 4m))
+            .ToList();
     }
 
-    private void CancelEdit()
-    {
-        editingEntry = null;
-        cashFlowError = null;
-    }
-
-    private async Task SaveEntryAsync()
-    {
-        if (editingEntry is null)
+    private static List<SavingsAccount> CreateAccountsWithBalances(IEnumerable<SavingsAccount> accounts, IReadOnlyDictionary<int, decimal> balances)
+        => accounts.Select(account => new SavingsAccount
         {
-            return;
-        }
+            Id = account.Id, UserId = account.UserId, Name = account.Name, BankName = account.BankName,
+            Balance = balances.GetValueOrDefault(account.Id, account.Balance), BalanceUpdatedAtUtc = account.BalanceUpdatedAtUtc,
+            InterestTaxPercent = account.InterestTaxPercent, MeetsBonusConditions = account.MeetsBonusConditions,
+            UpdatedAtUtc = account.UpdatedAtUtc, RateTiers = account.RateTiers
+        }).ToList();
 
-        try
-        {
-            cashFlowError = null;
-            editingEntry.FirstOccurrenceMonth = new DateTime(
-                editingEntry.FirstOccurrenceMonth.Year,
-                editingEntry.FirstOccurrenceMonth.Month,
-                1);
-
-            await using var db = await DbFactory.CreateDbContextAsync();
-            var storedEntry = await db.CashFlowEntries.SingleOrDefaultAsync(
-                x => x.Id == editingEntry.Id && x.UserId == userId);
-            if (storedEntry is null)
-            {
-                cashFlowError = "Položku sa nepodarilo nájsť.";
-                editingEntry = null;
-                await LoadAsync();
-                return;
-            }
-
-            storedEntry.Name = editingEntry.Name;
-            storedEntry.MonthlyAmount = editingEntry.MonthlyAmount;
-            storedEntry.Type = editingEntry.Type;
-            storedEntry.IntervalMonths = editingEntry.IntervalMonths;
-            storedEntry.FirstOccurrenceMonth = editingEntry.FirstOccurrenceMonth;
-
-            await db.SaveChangesAsync();
-            editingEntry = null;
-            await LoadAsync();
-        }
-        catch (DbUpdateException)
-        {
-            cashFlowError = "Zmeny položky sa nepodarilo uložiť. Reštartuj aplikáciu a skús to znova.";
-        }
-    }
-
-    private string EntrySchedule(CashFlowEntry entry)
-    {
-        if (entry.IntervalMonths is null)
-        {
-            return $"{(entry.Type == CashFlowType.Income ? "Príjem" : "Výdavok")} · jednorazovo · {MonthName(entry.FirstOccurrenceMonth)}";
-        }
-
-        var frequency = entry.IntervalMonths switch
-        {
-            1 => "mesačne",
-            3 => "kvartálne",
-            6 => "polročne",
-            12 => "ročne",
-            _ => $"každých {entry.IntervalMonths} mes."
-        };
-        var next = Enumerable.Range(0, 240)
-            .Select(offset => DateTime.Today.AddMonths(offset))
-            .Cast<DateTime?>()
-            .FirstOrDefault(month => FinancialCalculator.OccursInMonth(entry, month!.Value));
-        var nextText = next is null ? "mimo projekcie" : MonthName(next.Value);
-        return $"{(entry.Type == CashFlowType.Income ? "Príjem" : "Výdavok")} · {frequency} · najbližšie {nextText}";
-    }
-
-    private static CashFlowEntry CreateNewEntry() => new()
-    {
-        Type = CashFlowType.Income,
-        FirstOccurrenceMonth = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1)
-    };
-
+    private static string PieDash(decimal share) => $"{Invariant(Math.Clamp(share, 0m, 100m))} {Invariant(100m - Math.Clamp(share, 0m, 100m))}";
+    private static string PieOffset(decimal start) => Invariant(-Math.Clamp(start, 0m, 100m));
+    private string CompactMoney(decimal value) => value >= 1_000_000m ? $"{value / 1_000_000m:N1} mil." : $"{value / 1_000m:N0} tis.";
+    private static string Svg(decimal value) => value.ToString("0.##", CultureInfo.InvariantCulture);
+    private static string Invariant(decimal value) => value.ToString("0.##", CultureInfo.InvariantCulture);
     private string MonthName(DateTime month) => month.ToString("MMM yyyy", culture);
     private string Money(decimal value) => $"{value.ToString("N0", culture)} {currency}";
+    private sealed record ChartPoint(DateTime Month, decimal Value, decimal X, decimal Y);
+    private sealed record ChartGridline(decimal Y, decimal Value);
 }

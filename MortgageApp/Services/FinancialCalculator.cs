@@ -130,6 +130,84 @@ public static class FinancialCalculator
             last.CumulativeNetInterest);
     }
 
+    public static CurrentSavingsPosition CalculateCurrentSavingsPosition(
+        IEnumerable<CashFlowEntry> entries,
+        IReadOnlyCollection<SavingsAccount> savingsAccounts,
+        DateTime asOfDate,
+        MortgagePlan? mortgagePlan,
+        decimal savingsRatePercent,
+        decimal investmentRatePercent = 0m)
+    {
+        var confirmedBalance = savingsAccounts.Sum(x => x.Balance);
+        var balances = savingsAccounts.ToDictionary(x => x.Id, x => x.Balance);
+        if (savingsAccounts.Count == 0)
+        {
+            return new CurrentSavingsPosition(asOfDate, confirmedBalance, 0, 0, confirmedBalance, balances);
+        }
+
+        var confirmedAt = savingsAccounts.Max(x => x.BalanceUpdatedAtUtc ?? x.UpdatedAtUtc);
+        var (startMonth, months) = GetProjectionWindowAfterConfirmation(confirmedAt, asOfDate);
+        if (months == 0)
+        {
+            return new CurrentSavingsPosition(confirmedAt, confirmedBalance, 0, 0, confirmedBalance, balances);
+        }
+
+        var cashFlow = ProjectCashFlow(
+            entries,
+            startMonth,
+            mortgagePlan,
+            savingsRatePercent,
+            investmentRatePercent,
+            months);
+        var projection = ProjectSavingsPortfolio(savingsAccounts, cashFlow.Select(x => x.SavingsContribution));
+        var last = projection[^1];
+        var plannedDeposits = projection.Sum(row => row.Allocations.Sum(x => x.Amount));
+        var calculatedInterest = last.TotalBalance - confirmedBalance - plannedDeposits;
+
+        return new CurrentSavingsPosition(
+            confirmedAt,
+            confirmedBalance,
+            plannedDeposits,
+            calculatedInterest,
+            last.TotalBalance,
+            last.AccountBalances);
+    }
+
+    public static CurrentInvestmentPosition CalculateCurrentInvestmentPosition(
+        IEnumerable<CashFlowEntry> entries,
+        decimal confirmedBalance,
+        DateTime? confirmedAt,
+        DateTime asOfDate,
+        MortgagePlan? mortgagePlan,
+        decimal savingsRatePercent,
+        decimal investmentRatePercent)
+    {
+        if (confirmedAt is null)
+        {
+            return new CurrentInvestmentPosition(null, confirmedBalance, 0, confirmedBalance);
+        }
+
+        var (startMonth, months) = GetProjectionWindowAfterConfirmation(confirmedAt.Value, asOfDate);
+        if (months == 0)
+        {
+            return new CurrentInvestmentPosition(confirmedAt, confirmedBalance, 0, confirmedBalance);
+        }
+
+        var calculatedDeposits = ProjectCashFlow(
+                entries,
+                startMonth,
+                mortgagePlan,
+                savingsRatePercent,
+                investmentRatePercent,
+                months)
+            .Sum(x => x.InvestmentContribution);
+        return new CurrentInvestmentPosition(
+            confirmedAt,
+            confirmedBalance,
+            calculatedDeposits,
+            confirmedBalance + calculatedDeposits);
+    }
+
     public static IReadOnlyList<FinancialPositionProjectionRow> ProjectFinancialPosition(
         IEnumerable<CashFlowEntry> entries,
         IReadOnlyCollection<SavingsAccount> savingsAccounts,
@@ -283,7 +361,8 @@ public static class FinancialCalculator
                 balances.Values.Sum(),
                 netInterest,
                 allocation.Allocations,
-                allocation.UnallocatedAmount));
+                allocation.UnallocatedAmount,
+                new Dictionary<int, decimal>(balances)));
         }
 
         return rows;
@@ -432,6 +511,16 @@ public static class FinancialCalculator
             netRate);
     }
 
+    private static (DateTime StartMonth, int Months) GetProjectionWindowAfterConfirmation(
+        DateTime confirmedAt,
+        DateTime asOfDate)
+    {
+        var startMonth = new DateTime(confirmedAt.Year, confirmedAt.Month, 1).AddMonths(1);
+        var targetMonth = new DateTime(asOfDate.Year, asOfDate.Month, 1);
+        var months = (targetMonth.Year - startMonth.Year) * 12 + targetMonth.Month - startMonth.Month + 1;
+        return (startMonth, Math.Max(0, months));
+    }
+
     private sealed record MarginalSavingsOption(
         int AccountId,
         string AccountName,
@@ -458,7 +547,22 @@ public record SavingsPortfolioProjectionRow(
     decimal TotalBalance,
     decimal NetInterest,
     IReadOnlyList<SavingsAllocation> Allocations,
-    decimal UnallocatedAmount);
+    decimal UnallocatedAmount,
+    IReadOnlyDictionary<int, decimal> AccountBalances);
+
+public record CurrentSavingsPosition(
+    DateTime ConfirmedAt,
+    decimal ConfirmedBalance,
+    decimal CalculatedDeposits,
+    decimal CalculatedInterest,
+    decimal EstimatedCurrentBalance,
+    IReadOnlyDictionary<int, decimal> AccountBalances);
+
+public record CurrentInvestmentPosition(
+    DateTime? ConfirmedAt,
+    decimal ConfirmedBalance,
+    decimal CalculatedDeposits,
+    decimal EstimatedCurrentBalance);
 
 public record SavingsProjectionRow(int Month, decimal Balance, decimal NetInterest);
 

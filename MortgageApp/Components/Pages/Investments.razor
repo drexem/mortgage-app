@@ -1,0 +1,220 @@
+@page "/investicie"
+@attribute [Authorize]
+@rendermode InteractiveServer
+
+@using System.Globalization
+@using System.Security.Claims
+@using Microsoft.EntityFrameworkCore
+
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject FinancialDataService DataService
+
+<PageTitle>Investície</PageTitle>
+
+@if (loading)
+{
+    <div class="loading-state">Načítavam investície...</div>
+}
+else
+{
+    <header class="page-heading">
+        <div>
+            <p class="eyebrow">Investície bez výnosu</p>
+            <h1>Investovaný majetok</h1>
+            <p class="muted">Potvrď reálny zostatok. Medzi potvrdeniami aplikácia dopočíta plánované vklady podľa cash flow.</p>
+        </div>
+        @if (!string.IsNullOrWhiteSpace(message))
+        {
+            <span class="save-message">@message</span>
+        }
+    </header>
+
+    <section class="summary-grid">
+        <article class="summary-card">
+            <span>Manuálne potvrdené</span>
+            <strong>@Money(position.ConfirmedBalance)</strong>
+            <small>@ConfirmedAtText</small>
+        </article>
+        <article class="summary-card">
+            <span>Dopočítané vklady</span>
+            <strong>+ @Money(position.CalculatedDeposits)</strong>
+            <small>od posledného potvrdenia do dneška</small>
+        </article>
+        <article class="summary-card accent-card">
+            <span>Očakávaný stav dnes</span>
+            <strong>@Money(position.EstimatedCurrentBalance)</strong>
+            <small>bez investičného výnosu</small>
+        </article>
+        <article class="summary-card">
+            <span>Plánovaný vklad budúci mesiac</span>
+            <strong>@Money(nextMonthInvestmentContribution)</strong>
+            <small>@investmentRatePercent.ToString("N0") % z kladného prebytku</small>
+        </article>
+    </section>
+
+    <section class="two-panel-grid">
+        <article class="panel">
+            <div class="panel-header">
+                <div>
+                    <p class="eyebrow">Potvrdenie zostatku</p>
+                    <h2>Aký je reálny stav dnes?</h2>
+                </div>
+            </div>
+            <div class="settings-panel investment-balance-control">
+                <div class="field">
+                    <label>Aktuálne investované</label>
+                    <input type="number" min="0" step="100" class="form-control" @bind="confirmedBalanceInput" />
+                </div>
+                <button class="btn btn-primary" type="button" @onclick="ConfirmBalanceAsync">Potvrdiť dnešný stav</button>
+            </div>
+            <p class="muted planning-help">Potvrdením sa táto suma stane novým základom k dnešnému dátumu. Starší dopočet sa už nebude pripočítavať.</p>
+        </article>
+
+        <article class="panel">
+            <div class="panel-header">
+                <div>
+                    <p class="eyebrow">Rozdelenie prebytku</p>
+                    <h2>Podiel investovania</h2>
+                </div>
+            </div>
+            <div class="planning-control investment-rate-control">
+                <div class="field">
+                    <label>Investície (%)</label>
+                    <input type="number" min="0" max="100" step="1" class="form-control"
+                           @bind="InvestmentRateInput" @bind:event="oninput" />
+                </div>
+                <div class="field">
+                    <label>Sporiace účty (%)</label>
+                    <input type="number" min="0" max="100" step="1" class="form-control"
+                           @bind="SavingsRateInput" @bind:event="oninput" />
+                </div>
+                <button class="btn btn-primary" type="button" @onclick="SaveRatesAsync">Uložiť rozdelenie</button>
+            </div>
+        </article>
+    </section>
+
+    <section class="panel recommendation-panel">
+        <div class="panel-header">
+            <div>
+                <p class="eyebrow">Prognóza</p>
+                <h2>Investície najbližších 12 mesiacov</h2>
+            </div>
+        </div>
+        <div class="projection-list">
+            @foreach (var row in projection)
+            {
+                <div class="projection-row">
+                    <span>@MonthName(row.Month)</span>
+                    <span>+ @Money(row.Contribution)</span>
+                    <strong>@Money(row.Balance)</strong>
+                </div>
+            }
+        </div>
+    </section>
+}
+
+@code {
+    private readonly CultureInfo culture = CultureInfo.GetCultureInfo("sk-SK");
+    private readonly List<CashFlowEntry> entries = [];
+    private MortgagePlan mortgage = new();
+    private CurrentInvestmentPosition position = new(null, 0, 0, 0);
+    private IReadOnlyList<InvestmentProjectionRow> projection = [];
+    private string userId = "";
+    private string currency = "CZK";
+    private string? message;
+    private bool loading = true;
+    private decimal savingsRatePercent = 100m;
+    private decimal investmentRatePercent;
+    private decimal confirmedBalanceInput;
+    private decimal nextMonthInvestmentContribution;
+
+    private string ConfirmedAtText => position.ConfirmedAt is null
+        ? "zostatok ešte nebol potvrdený"
+        : $"naposledy {position.ConfirmedAt.Value.ToLocalTime().ToString("d. M. yyyy HH:mm", culture)}";
+    private decimal SavingsRateInput
+    {
+        get => savingsRatePercent;
+        set
+        {
+            savingsRatePercent = Math.Clamp(value, 0m, 100m);
+        }
+    }
+    private decimal InvestmentRateInput
+    {
+        get => investmentRatePercent;
+        set
+        {
+            investmentRatePercent = Math.Clamp(value, 0m, 100m);
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        userId = auth.User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "";
+        await LoadAsync();
+        loading = false;
+    }
+
+    private async Task LoadAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var user = await db.Users.SingleAsync(x => x.Id == userId);
+        currency = user.PreferredCurrency;
+        savingsRatePercent = user.SavingsRatePercent;
+        investmentRatePercent = user.InvestmentRatePercent;
+        confirmedBalanceInput = user.InvestmentBalance;
+        entries.Clear();
+        entries.AddRange(await db.CashFlowEntries.Where(x => x.UserId == userId).ToListAsync());
+        mortgage = await DataService.GetOrCreateMortgagePlanAsync(userId);
+
+        position = FinancialCalculator.CalculateCurrentInvestmentPosition(
+            entries,
+            user.InvestmentBalance,
+            user.InvestmentBalanceUpdatedAtUtc,
+            DateTime.Today,
+            mortgage,
+            savingsRatePercent,
+            investmentRatePercent);
+        var cashFlow = FinancialCalculator.ProjectCashFlow(
+            entries,
+            DateTime.Today.AddMonths(1),
+            mortgage,
+            savingsRatePercent,
+            investmentRatePercent);
+        nextMonthInvestmentContribution = cashFlow.First().InvestmentContribution;
+        decimal balance = position.EstimatedCurrentBalance;
+        projection = cashFlow.Select(row =>
+        {
+            balance += row.InvestmentContribution;
+            return new InvestmentProjectionRow(row.Month, row.InvestmentContribution, balance);
+        }).ToList();
+    }
+
+    private async Task ConfirmBalanceAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var user = await db.Users.SingleAsync(x => x.Id == userId);
+        user.InvestmentBalance = Math.Max(0m, confirmedBalanceInput);
+        user.InvestmentBalanceUpdatedAtUtc = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+        message = "Investičný zostatok bol potvrdený k dnešnému dňu.";
+        await LoadAsync();
+    }
+
+    private async Task SaveRatesAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var user = await db.Users.SingleAsync(x => x.Id == userId);
+        user.SavingsRatePercent = Math.Clamp(savingsRatePercent, 0m, 100m);
+        user.InvestmentRatePercent = Math.Clamp(investmentRatePercent, 0m, 100m - user.SavingsRatePercent);
+        await db.SaveChangesAsync();
+        message = "Rozdelenie prebytku bolo uložené.";
+        await LoadAsync();
+    }
+
+    private string MonthName(DateTime month) => month.ToString("MMM yyyy", culture);
+    private string Money(decimal value) => $"{value.ToString("N0", culture)} {currency}";
+    private sealed record InvestmentProjectionRow(DateTime Month, decimal Contribution, decimal Balance);
+}

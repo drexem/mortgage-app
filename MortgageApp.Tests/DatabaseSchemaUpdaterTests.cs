@@ -7,6 +7,36 @@ namespace MortgageApp.Tests;
 public class DatabaseSchemaUpdaterTests
 {
     [Fact]
+    public async Task UpdateAsync_AddsMortgageMarkerToCashFlowEntries()
+    {
+        var databasePath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite($"Data Source={databasePath}")
+            .Options;
+
+        await using (var db = new ApplicationDbContext(options))
+        {
+            await db.Database.EnsureCreatedAsync();
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE CashFlowEntries DROP COLUMN IsMortgageRelated");
+            await DatabaseSchemaUpdater.UpdateAsync(db);
+        }
+
+        await using (var connection = new SqliteConnection($"Data Source={databasePath}"))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = "PRAGMA table_info(CashFlowEntries)";
+            await using var reader = await command.ExecuteReaderAsync();
+            var columns = new List<string>();
+            while (await reader.ReadAsync()) columns.Add(reader.GetString(1));
+            Assert.Contains("IsMortgageRelated", columns);
+        }
+
+        SqliteConnection.ClearAllPools();
+        File.Delete(databasePath);
+    }
+
+    [Fact]
     public async Task UpdateAsync_AddsInvestmentSettingsToExistingUsers()
     {
         var databasePath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
@@ -19,6 +49,7 @@ public class DatabaseSchemaUpdaterTests
             await db.Database.EnsureCreatedAsync();
             await db.Database.ExecuteSqlRawAsync("ALTER TABLE AspNetUsers DROP COLUMN InvestmentRatePercent");
             await db.Database.ExecuteSqlRawAsync("ALTER TABLE AspNetUsers DROP COLUMN InvestmentBalance");
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE AspNetUsers DROP COLUMN InvestmentBalanceUpdatedAtUtc");
 
             await DatabaseSchemaUpdater.UpdateAsync(db);
         }
@@ -37,6 +68,41 @@ public class DatabaseSchemaUpdaterTests
 
             Assert.Contains("InvestmentRatePercent", columns);
             Assert.Contains("InvestmentBalance", columns);
+            Assert.Contains("InvestmentBalanceUpdatedAtUtc", columns);
+        }
+
+        SqliteConnection.ClearAllPools();
+        File.Delete(databasePath);
+    }
+
+    [Fact]
+    public async Task UpdateAsync_AddsSavingsBalanceConfirmationDate()
+    {
+        var databasePath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.db");
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite($"Data Source={databasePath}")
+            .Options;
+
+        await using (var db = new ApplicationDbContext(options))
+        {
+            await db.Database.EnsureCreatedAsync();
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE SavingsAccounts DROP COLUMN BalanceUpdatedAtUtc");
+            await DatabaseSchemaUpdater.UpdateAsync(db);
+        }
+
+        await using (var connection = new SqliteConnection($"Data Source={databasePath}"))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = "PRAGMA table_info(SavingsAccounts)";
+            await using var reader = await command.ExecuteReaderAsync();
+            var columns = new List<string>();
+            while (await reader.ReadAsync())
+            {
+                columns.Add(reader.GetString(1));
+            }
+
+            Assert.Contains("BalanceUpdatedAtUtc", columns);
         }
 
         SqliteConnection.ClearAllPools();

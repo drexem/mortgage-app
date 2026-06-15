@@ -40,13 +40,14 @@ else
             <strong>@accounts.Count</strong>
         </article>
         <article class="summary-card">
-            <span>Celkový zostatok</span>
-            <strong>@Money(accounts.Sum(x => x.Balance))</strong>
+            <span>Manuálne potvrdené</span>
+            <strong>@Money(currentPosition.ConfirmedBalance)</strong>
+            <small>naposledy @DateTimeText(currentPosition.ConfirmedAt)</small>
         </article>
         <article class="summary-card">
-            <span>Aktuálne investované</span>
-            <strong>@Money(currentInvestmentBalance)</strong>
-            <small>bez započítania výnosu</small>
+            <span>Očakávaný stav dnes</span>
+            <strong>@Money(currentPosition.EstimatedCurrentBalance)</strong>
+            <small>+ @Money(CurrentCalculation) podľa cash flow a úrokov</small>
         </article>
         <article class="summary-card accent-card">
             <span>Vklad tento mesiac</span>
@@ -76,14 +77,10 @@ else
                     <input type="number" min="0" max="100" step="1" class="form-control"
                            @bind="InvestmentRateInput" @bind:event="oninput" />
                 </div>
-                <div class="field">
-                    <label>Aktuálne v investíciách</label>
-                    <input type="number" min="0" step="100" class="form-control" @bind="currentInvestmentBalance" />
-                </div>
                 <button class="btn btn-primary" type="button" @onclick="SaveSavingsRateAsync">Uložiť a prepočítať</button>
             </div>
         </div>
-        <p class="muted planning-help">Súčet je vždy 100 %. Pri zmene jedného percenta sa druhé automaticky dopočíta. Investície sa v odhadoch počítajú bez zisku.</p>
+        <p class="muted planning-help">Nevyužitý zvyšok do 100 % ostáva ako cash. Investície sa v odhadoch počítajú bez zisku.</p>
 
         @if (accounts.Count == 0)
         {
@@ -156,7 +153,8 @@ else
                                 @onclick="() => SelectAccount(item.Id)">
                             <span>@item.Name</span>
                             <small>@(string.IsNullOrWhiteSpace(item.BankName) ? "Bez banky" : item.BankName)</small>
-                            <strong>@Money(item.Balance)</strong>
+                            <strong>@Money(EstimatedAccountBalance(item))</strong>
+                            <small>potvrdené @Money(item.Balance) · @DateTimeText(item.BalanceUpdatedAtUtc ?? item.UpdatedAtUtc)</small>
                         </button>
                     }
                 </div>
@@ -189,8 +187,9 @@ else
                                 <InputText class="form-control" @bind-Value="account.BankName" />
                             </div>
                             <div class="field">
-                                <label>Aktuálny zostatok</label>
+                                <label>Manuálne potvrdený zostatok</label>
                                 <InputNumber class="form-control" @bind-Value="account.Balance" />
+                                <small class="muted">Posledné potvrdenie: @DateTimeText(account.BalanceUpdatedAtUtc ?? account.UpdatedAtUtc)</small>
                             </div>
                             <div class="field">
                                 <label>Daň z úroku (%)</label>
@@ -224,6 +223,7 @@ else
 
                         <div class="form-actions">
                             <button class="btn btn-secondary" type="button" @onclick="AddTier">Pridať pásmo</button>
+                            <button class="btn btn-secondary" type="button" @onclick="ConfirmAccountBalanceAsync">Potvrdiť zostatok dnes</button>
                             <button class="btn btn-primary" type="submit">Uložiť účet</button>
                         </div>
                     </EditForm>
@@ -269,16 +269,17 @@ else
     private bool loading = true;
     private decimal savingsRatePercent = 100m;
     private decimal investmentRatePercent;
-    private decimal currentInvestmentBalance;
     private decimal currentSavingsContribution;
     private decimal projectedInterest;
+    private CurrentSavingsPosition currentPosition = new(DateTime.Today, 0, 0, 0, 0, new Dictionary<int, decimal>());
+    private List<SavingsAccount> estimatedAccounts = [];
+    private decimal CurrentCalculation => currentPosition.CalculatedDeposits + currentPosition.CalculatedInterest;
     private decimal SavingsRateInput
     {
         get => savingsRatePercent;
         set
         {
             savingsRatePercent = Math.Clamp(value, 0m, 100m);
-            investmentRatePercent = 100m - savingsRatePercent;
         }
     }
     private decimal InvestmentRateInput
@@ -287,7 +288,6 @@ else
         set
         {
             investmentRatePercent = Math.Clamp(value, 0m, 100m);
-            savingsRatePercent = 100m - investmentRatePercent;
         }
     }
 
@@ -310,7 +310,6 @@ else
         currency = user.PreferredCurrency;
         savingsRatePercent = user.SavingsRatePercent;
         investmentRatePercent = user.InvestmentRatePercent;
-        currentInvestmentBalance = user.InvestmentBalance;
         cashFlowEntries.Clear();
         cashFlowEntries.AddRange(await db.CashFlowEntries.Where(x => x.UserId == userId).ToListAsync());
         mortgage = await DataService.GetOrCreateMortgagePlanAsync(userId);
@@ -326,22 +325,30 @@ else
 
     private void Recalculate()
     {
-        var cashFlowProjection = FinancialCalculator.ProjectCashFlow(
+        currentPosition = FinancialCalculator.CalculateCurrentSavingsPosition(
             cashFlowEntries,
+            accounts,
             DateTime.Today,
             mortgage,
             savingsRatePercent,
             investmentRatePercent);
+        estimatedAccounts = CreateAccountsWithBalances(accounts, currentPosition.AccountBalances);
+        var cashFlowProjection = FinancialCalculator.ProjectCashFlow(
+            cashFlowEntries,
+            DateTime.Today.AddMonths(1),
+            mortgage,
+            savingsRatePercent,
+            investmentRatePercent);
         currentSavingsContribution = cashFlowProjection.First().SavingsContribution;
-        allocationPlan = FinancialCalculator.PlanSavingsAllocation(accounts, currentSavingsContribution);
-        nextBest = FinancialCalculator.PlanSavingsAllocation(accounts, 1m).Allocations.FirstOrDefault();
+        allocationPlan = FinancialCalculator.PlanSavingsAllocation(estimatedAccounts, currentSavingsContribution);
+        nextBest = FinancialCalculator.PlanSavingsAllocation(estimatedAccounts, 1m).Allocations.FirstOrDefault();
         portfolioProjection = FinancialCalculator.ProjectSavingsPortfolio(
-            accounts,
+            estimatedAccounts,
             cashFlowProjection.Select(x => x.SavingsContribution));
         var projectedDeposits = portfolioProjection.Sum(row => row.Allocations.Sum(x => x.Amount));
         projectedInterest = portfolioProjection.Count == 0
             ? 0
-            : portfolioProjection[^1].TotalBalance - accounts.Sum(x => x.Balance) - projectedDeposits;
+            : portfolioProjection[^1].TotalBalance - currentPosition.EstimatedCurrentBalance - projectedDeposits;
         StateHasChanged();
     }
 
@@ -350,11 +357,9 @@ else
         await using var db = await DbFactory.CreateDbContextAsync();
         var user = await db.Users.SingleAsync(x => x.Id == userId);
         user.SavingsRatePercent = Math.Clamp(savingsRatePercent, 0m, 100m);
-        user.InvestmentRatePercent = 100m - user.SavingsRatePercent;
-        user.InvestmentBalance = Math.Max(0m, currentInvestmentBalance);
+        user.InvestmentRatePercent = Math.Clamp(investmentRatePercent, 0m, 100m - user.SavingsRatePercent);
         savingsRatePercent = user.SavingsRatePercent;
         investmentRatePercent = user.InvestmentRatePercent;
-        currentInvestmentBalance = user.InvestmentBalance;
         await db.SaveChangesAsync();
         message = "Rozdelenie prebytku medzi sporenie a investície je uložené.";
         Recalculate();
@@ -389,7 +394,11 @@ else
 
         stored.Name = account.Name;
         stored.BankName = account.BankName;
-        stored.Balance = account.Balance;
+        if (stored.Balance != account.Balance)
+        {
+            stored.Balance = account.Balance;
+            stored.BalanceUpdatedAtUtc = DateTime.UtcNow;
+        }
         stored.InterestTaxPercent = account.InterestTaxPercent;
         stored.MeetsBonusConditions = account.MeetsBonusConditions;
         stored.UpdatedAtUtc = DateTime.UtcNow;
@@ -429,6 +438,23 @@ else
         await LoadAsync();
     }
 
+    private async Task ConfirmAccountBalanceAsync()
+    {
+        if (account is null)
+        {
+            return;
+        }
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var stored = await db.SavingsAccounts.SingleAsync(x => x.Id == account.Id && x.UserId == userId);
+        stored.Balance = Math.Max(0m, account.Balance);
+        stored.BalanceUpdatedAtUtc = DateTime.UtcNow;
+        stored.UpdatedAtUtc = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+        message = "Zostatok sporiaceho účtu bol potvrdený k dnešnému dňu.";
+        await LoadAsync(stored.Id);
+    }
+
     private void AddTier()
     {
         account?.RateTiers.Add(new SavingsRateTier { SortOrder = account.RateTiers.Count + 1 });
@@ -450,6 +476,25 @@ else
         => string.IsNullOrWhiteSpace(allocation.BankName) ? "Bez banky" : allocation.BankName;
 
     private string MonthName(int offset) => DateTime.Today.AddMonths(offset).ToString("MMM yyyy", culture);
+    private string DateTimeText(DateTime value) => value.ToLocalTime().ToString("d. M. yyyy HH:mm", culture);
+    private decimal EstimatedAccountBalance(SavingsAccount item)
+        => currentPosition.AccountBalances.GetValueOrDefault(item.Id, item.Balance);
+    private static List<SavingsAccount> CreateAccountsWithBalances(
+        IEnumerable<SavingsAccount> source,
+        IReadOnlyDictionary<int, decimal> balances)
+        => source.Select(item => new SavingsAccount
+        {
+            Id = item.Id,
+            UserId = item.UserId,
+            Name = item.Name,
+            BankName = item.BankName,
+            Balance = balances.GetValueOrDefault(item.Id, item.Balance),
+            BalanceUpdatedAtUtc = item.BalanceUpdatedAtUtc,
+            InterestTaxPercent = item.InterestTaxPercent,
+            MeetsBonusConditions = item.MeetsBonusConditions,
+            UpdatedAtUtc = item.UpdatedAtUtc,
+            RateTiers = item.RateTiers
+        }).ToList();
     private string Money(decimal value) => $"{value.ToString("N0", culture)} {currency}";
     private string Percent(decimal value) => $"{value.ToString("N2", culture)} %";
 }

@@ -1,0 +1,190 @@
+@page "/cashflow"
+@attribute [Authorize]
+@rendermode InteractiveServer
+
+@using System.Globalization
+@using System.Security.Claims
+@using Microsoft.EntityFrameworkCore
+
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject FinancialDataService DataService
+
+<PageTitle>Cash flow</PageTitle>
+
+@if (loading)
+{
+    <div class="loading-state">Načítavam cash flow...</div>
+}
+else
+{
+    <header class="page-heading">
+        <div>
+            <p class="eyebrow">Cash flow</p>
+            <h1>Príjmy a výdavky</h1>
+            <p class="muted">Tieto položky tvoria základ mesačných prognóz na dashboarde.</p>
+        </div>
+        <a class="btn btn-secondary" href="">Späť na dashboard</a>
+    </header>
+
+    <section class="summary-grid">
+        <article class="summary-card"><span>Príjmy tento mesiac</span><strong class="income-text">@Money(currentMonth.Income)</strong></article>
+        <article class="summary-card"><span>Výdavky tento mesiac</span><strong class="expense-text">@Money(currentMonth.Expenses)</strong></article>
+        <article class="summary-card accent-card"><span>Prebytok pred rozdelením</span><strong>@Money(currentMonth.FreeBeforeSavings)</strong></article>
+    </section>
+
+    <section class="panel recommendation-panel">
+        <div class="panel-header"><div><p class="eyebrow">Nová položka</p><h2>Pridať príjem alebo výdavok</h2></div></div>
+        <EditForm Model="newEntry" OnValidSubmit="AddEntryAsync" class="cashflow-form cashflow-page-form">
+            <DataAnnotationsValidator />
+            <div class="field"><label>Názov</label><InputText class="form-control" @bind-Value="newEntry.Name" /></div>
+            <div class="field"><label>Suma</label><InputNumber class="form-control" @bind-Value="newEntry.MonthlyAmount" /></div>
+            <div class="field"><label>Typ</label><InputSelect class="form-select" @bind-Value="newEntry.Type"><option value="@CashFlowType.Income">Príjem</option><option value="@CashFlowType.Expense">Výdavok</option></InputSelect></div>
+            <div class="field"><label>Opakovať každých X mesiacov</label><InputNumber class="form-control" @bind-Value="newEntry.IntervalMonths" placeholder="Jednorazovo" /></div>
+            <div class="field"><label>Prvý mesiac</label><InputDate class="form-control" @bind-Value="newEntry.FirstOccurrenceMonth" /></div>
+            @if (newEntry.Type == CashFlowType.Expense)
+            {
+                <label class="check-row mortgage-check"><InputCheckbox @bind-Value="newEntry.IsMortgageRelated" /> Hypotéka <a class="gear-link small-gear" title="Konfigurácia hypotéky" href="hypoteka">⚙</a></label>
+            }
+            <button class="btn btn-primary" type="submit">Pridať položku</button>
+        </EditForm>
+        <p class="muted planning-help">Checkbox hypotéka položku iba označí a pridá odkaz na konfiguráciu. Automatická splátka hypotéky sa počíta samostatne, preto sa výdavok nezapočíta druhýkrát.</p>
+        @if (!string.IsNullOrWhiteSpace(errorMessage)) { <div class="alert alert-danger">@errorMessage</div> }
+    </section>
+
+    <section class="panel">
+        <div class="panel-header"><div><p class="eyebrow">Nastavené položky</p><h2>Pravidelné a jednorazové cash flow</h2></div></div>
+        <div class="entry-list">
+            @if (mortgagePayment > 0)
+            {
+                <div class="entry-row mortgage-entry">
+                    <span class="entry-dot expense-dot"></span><div><strong>Automatická splátka hypotéky</strong><small>Podľa konfigurácie hypotéky</small></div>
+                    <span class="entry-amount">- @Money(mortgagePayment)</span><a class="gear-link small-gear" href="hypoteka" title="Konfigurácia hypotéky">⚙</a>
+                </div>
+            }
+            @foreach (var entry in entries.OrderBy(x => x.Type).ThenByDescending(x => x.MonthlyAmount))
+            {
+                <div class="entry-row">
+                    <span class="entry-dot @(entry.Type == CashFlowType.Income ? "income-dot" : "expense-dot")"></span>
+                    <div><strong>@entry.Name</strong><small>@Schedule(entry)@(entry.IsMortgageRelated ? " · hypotéka" : "")</small></div>
+                    <span class="entry-amount @(entry.Type == CashFlowType.Income ? "income-text" : "")">@(entry.Type == CashFlowType.Income ? "+" : "-") @Money(entry.MonthlyAmount)</span>
+                    <div class="entry-actions">
+                        @if (entry.IsMortgageRelated) { <a class="gear-link small-gear" href="hypoteka" title="Konfigurácia hypotéky">⚙</a> }
+                        <button class="icon-button edit-icon-button" title="Upraviť" @onclick="() => BeginEdit(entry)">✎</button>
+                        <button class="icon-button" title="Odstrániť" @onclick="() => DeleteEntryAsync(entry.Id)">×</button>
+                    </div>
+                </div>
+                @if (editingEntry?.Id == entry.Id)
+                {
+                    <EditForm Model="editingEntry" OnValidSubmit="SaveEntryAsync" class="cashflow-form entry-edit-form cashflow-page-form">
+                        <DataAnnotationsValidator />
+                        <div class="field"><label>Názov</label><InputText class="form-control" @bind-Value="editingEntry.Name" /></div>
+                        <div class="field"><label>Suma</label><InputNumber class="form-control" @bind-Value="editingEntry.MonthlyAmount" /></div>
+                        <div class="field"><label>Typ</label><InputSelect class="form-select" @bind-Value="editingEntry.Type"><option value="@CashFlowType.Income">Príjem</option><option value="@CashFlowType.Expense">Výdavok</option></InputSelect></div>
+                        <div class="field"><label>Opakovanie</label><InputNumber class="form-control" @bind-Value="editingEntry.IntervalMonths" /></div>
+                        <div class="field"><label>Prvý mesiac</label><InputDate class="form-control" @bind-Value="editingEntry.FirstOccurrenceMonth" /></div>
+                        @if (editingEntry.Type == CashFlowType.Expense)
+                        {
+                            <label class="check-row mortgage-check"><InputCheckbox @bind-Value="editingEntry.IsMortgageRelated" /> Hypotéka <a class="gear-link small-gear" href="hypoteka">⚙</a></label>
+                        }
+                        <div class="entry-edit-actions"><button class="btn btn-secondary btn-small" type="button" @onclick="CancelEdit">Zrušiť</button><button class="btn btn-primary btn-small" type="submit">Uložiť</button></div>
+                    </EditForm>
+                }
+            }
+        </div>
+    </section>
+}
+
+@code {
+    private readonly CultureInfo culture = CultureInfo.GetCultureInfo("sk-SK");
+    private readonly List<CashFlowEntry> entries = [];
+    private CashFlowEntry newEntry = CreateEntry();
+    private CashFlowEntry? editingEntry;
+    private CashFlowProjectionRow currentMonth = new(DateTime.Today, 0, 0, 0, 0, 0, 0, 0, 0);
+    private MortgagePlan mortgage = new();
+    private string userId = "";
+    private string currency = "CZK";
+    private string? errorMessage;
+    private bool loading = true;
+    private decimal mortgagePayment;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        userId = auth.User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "";
+        newEntry.UserId = userId;
+        await LoadAsync();
+        loading = false;
+    }
+
+    private async Task LoadAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        entries.Clear();
+        entries.AddRange(await db.CashFlowEntries.Where(x => x.UserId == userId).ToListAsync());
+        var user = await db.Users.SingleAsync(x => x.Id == userId);
+        currency = user.PreferredCurrency;
+        mortgage = await DataService.GetOrCreateMortgagePlanAsync(userId);
+        currentMonth = FinancialCalculator.ProjectCashFlow(entries, DateTime.Today, mortgage, user.SavingsRatePercent, user.InvestmentRatePercent, 1).First();
+        mortgagePayment = FinancialCalculator.CalculateMortgagePaymentForMonth(mortgage, DateTime.Today);
+    }
+
+    private async Task AddEntryAsync()
+    {
+        try
+        {
+            errorMessage = null;
+            Normalize(newEntry);
+            await using var db = await DbFactory.CreateDbContextAsync();
+            db.CashFlowEntries.Add(newEntry);
+            await db.SaveChangesAsync();
+            newEntry = CreateEntry();
+            newEntry.UserId = userId;
+            await LoadAsync();
+        }
+        catch (DbUpdateException) { errorMessage = "Položku sa nepodarilo uložiť."; }
+    }
+
+    private void BeginEdit(CashFlowEntry entry) => editingEntry = new CashFlowEntry
+    {
+        Id = entry.Id, UserId = userId, Name = entry.Name, MonthlyAmount = entry.MonthlyAmount, Type = entry.Type,
+        IsMortgageRelated = entry.IsMortgageRelated, IntervalMonths = entry.IntervalMonths, FirstOccurrenceMonth = entry.FirstOccurrenceMonth
+    };
+    private void CancelEdit() => editingEntry = null;
+
+    private async Task SaveEntryAsync()
+    {
+        if (editingEntry is null) return;
+        Normalize(editingEntry);
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var stored = await db.CashFlowEntries.SingleAsync(x => x.Id == editingEntry.Id && x.UserId == userId);
+        stored.Name = editingEntry.Name;
+        stored.MonthlyAmount = editingEntry.MonthlyAmount;
+        stored.Type = editingEntry.Type;
+        stored.IsMortgageRelated = editingEntry.IsMortgageRelated;
+        stored.IntervalMonths = editingEntry.IntervalMonths;
+        stored.FirstOccurrenceMonth = editingEntry.FirstOccurrenceMonth;
+        await db.SaveChangesAsync();
+        editingEntry = null;
+        await LoadAsync();
+    }
+
+    private async Task DeleteEntryAsync(int id)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var stored = await db.CashFlowEntries.SingleOrDefaultAsync(x => x.Id == id && x.UserId == userId);
+        if (stored is not null) { db.Remove(stored); await db.SaveChangesAsync(); }
+        await LoadAsync();
+    }
+
+    private string Schedule(CashFlowEntry entry) => entry.IntervalMonths is null
+        ? $"jednorazovo · {entry.FirstOccurrenceMonth.ToString("MMM yyyy", culture)}"
+        : entry.IntervalMonths == 1 ? "mesačne" : $"každých {entry.IntervalMonths} mes.";
+    private static void Normalize(CashFlowEntry entry)
+    {
+        entry.FirstOccurrenceMonth = new(entry.FirstOccurrenceMonth.Year, entry.FirstOccurrenceMonth.Month, 1);
+        if (entry.Type != CashFlowType.Expense) entry.IsMortgageRelated = false;
+    }
+    private static CashFlowEntry CreateEntry() => new() { Type = CashFlowType.Income, FirstOccurrenceMonth = new(DateTime.Today.Year, DateTime.Today.Month, 1) };
+    private string Money(decimal value) => $"{value.ToString("N0", culture)} {currency}";
+}
