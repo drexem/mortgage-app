@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.HttpOverrides;
 using MortgageApp.Components;
 using MortgageApp.Components.Account;
 using MortgageApp.Data;
@@ -40,6 +41,11 @@ builder.Services.AddIdentityCore<ApplicationUser>(options =>
 builder.Services.AddScoped<FinancialDataService>();
 
 var app = builder.Build();
+
+app.UseForwardedHeaders(new ForwardedHeadersOptions
+{
+    ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
+});
 
 await using (var scope = app.Services.CreateAsyncScope())
 {
