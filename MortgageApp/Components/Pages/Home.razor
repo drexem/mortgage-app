@@ -31,10 +31,27 @@ else
         <article class="panel today-position">
             <div class="panel-header">
                 <div>
-                    <p class="eyebrow">Predpokladané financie k dnešnému dňu</p>
+                    <div class="date-estimate-control">
+                        <p class="eyebrow date-estimate-heading">
+                            Predpokladané financie k
+                            <button type="button" @onclick="TogglePositionDatePicker">@PositionDateLabel</button>
+                        </p>
+                        @if (showPositionDatePicker)
+                        {
+                            <div class="date-picker-popover">
+                                <label>Vyber dátum</label>
+                                <input class="compact-date-input" type="date" min="@TodayInputValue"
+                                       @bind="selectedPositionDate" @bind:after="ApplyPositionDate" />
+                                @if (selectedPositionDate.Date != DateTime.Today)
+                                {
+                                    <button class="date-picker-today" type="button" @onclick="ResetPositionDate">Použiť dnešný dátum</button>
+                                }
+                            </div>
+                        }
+                    </div>
                     <h2>Sporenie a investície</h2>
                 </div>
-                <strong class="hero-total">@Money(ExpectedTodayTotal)</strong>
+                <strong class="hero-total">@Money(SelectedPositionTotal)</strong>
             </div>
             <div class="today-position-content">
                 <div class="interactive-pie large-portfolio-pie">
@@ -42,12 +59,12 @@ else
                         <circle class="pie-track" cx="50" cy="50" r="38"></circle>
                         <circle class="pie-segment savings-segment" cx="50" cy="50" r="38" pathLength="100"
                                 stroke-dasharray="@PieDash(SavingsTodayShare)" stroke-dashoffset="0"
-                                @onmouseenter='() => SetTodayPieInfo("Sporenie", currentSavingsPosition.EstimatedCurrentBalance, SavingsTodayShare)'
-                                @onmouseleave="ClearTodayPieInfo"><title>Sporenie: @Money(currentSavingsPosition.EstimatedCurrentBalance)</title></circle>
+                                @onmouseenter='() => SetTodayPieInfo("Sporenie", SelectedSavingsBalance, SavingsTodayShare)'
+                                @onmouseleave="ClearTodayPieInfo"><title>Sporenie: @Money(SelectedSavingsBalance)</title></circle>
                         <circle class="pie-segment investment-segment" cx="50" cy="50" r="38" pathLength="100"
                                 stroke-dasharray="@PieDash(InvestmentTodayShare)" stroke-dashoffset="@PieOffset(SavingsTodayShare)"
-                                @onmouseenter='() => SetTodayPieInfo("Investície", currentInvestmentPosition.EstimatedCurrentBalance, InvestmentTodayShare)'
-                                @onmouseleave="ClearTodayPieInfo"><title>Investície: @Money(currentInvestmentPosition.EstimatedCurrentBalance)</title></circle>
+                                @onmouseenter='() => SetTodayPieInfo("Investície", SelectedInvestmentBalance, InvestmentTodayShare)'
+                                @onmouseleave="ClearTodayPieInfo"><title>Investície: @Money(SelectedInvestmentBalance)</title></circle>
                     </svg>
                     <span>@todayPieLabel<small>@todayPieDetail</small></span>
                 </div>
@@ -55,14 +72,19 @@ else
                     <a href="sporenie">
                         <i class="savings-swatch"></i>
                         <span>Sporenie<small>potvrdené + dopočítané</small></span>
-                        <strong>@Money(currentSavingsPosition.EstimatedCurrentBalance)</strong>
+                        <strong>@Money(SelectedSavingsBalance)</strong>
                     </a>
                     <a href="investicie">
                         <i class="investment-swatch"></i>
                         <span>Investície<small>bez predpokladaného výnosu</small></span>
-                        <strong>@Money(currentInvestmentPosition.EstimatedCurrentBalance)</strong>
+                        <strong>@Money(SelectedInvestmentBalance)</strong>
                     </a>
                 </div>
+            </div>
+            <div class="balance-confirmation-strip">
+                <span><i class="savings-swatch"></i>Sporenie naposledy potvrdené <strong>@DateTimeText(currentSavingsPosition.ConfirmedAt)</strong></span>
+                <span><i class="investment-swatch"></i>Investície naposledy potvrdené <strong>@DateTimeText(currentInvestmentPosition.ConfirmedAt)</strong></span>
+                <span><i class="cash-swatch"></i>Cash <strong>manuálne neevidovaný</strong></span>
             </div>
         </article>
 
@@ -122,7 +144,16 @@ else
                 <p class="eyebrow">Predpokladaný vývoj</p>
                 <h2>Najbližších 12 mesiacov</h2>
             </div>
-            <span class="balance-pill positive">@Money(FinalProjectedTotal)</span>
+            <span class="balance-pill chart-value-pill @ChartHeaderCssClass">@Money(ChartHeaderValue)</span>
+        </div>
+        <div class="chart-series-switcher" role="group" aria-label="Zobrazená časť financií">
+            @foreach (var option in ChartSeriesOptions)
+            {
+                <button class="@(selectedChartSeries.Contains(option.Series) ? "active" : "")" type="button"
+                        @onclick="() => ToggleChartSeries(option.Series)">
+                    <i class="@option.CssClass"></i>@option.Label
+                </button>
+            }
         </div>
         <div class="development-chart">
             <svg viewBox="0 0 1100 330" role="img" aria-label="Graf predpokladaného vývoja financií">
@@ -140,16 +171,33 @@ else
                         <div class="axis-month">@point.Month.ToString("MMM", culture)<small>@point.Month.Year</small></div>
                     </foreignObject>
                 }
-                <polygon class="chart-area" points="@DevelopmentAreaPoints"></polygon>
-                <polyline class="chart-line" points="@DevelopmentChartPoints"></polyline>
-                @foreach (var point in ChartPoints)
+                @foreach (var series in SelectedSeriesData)
                 {
-                    <circle class="chart-point" cx="@Svg(point.X)" cy="@Svg(point.Y)" r="6">
-                        <title>@MonthName(point.Month): @Money(point.Value)</title>
-                    </circle>
+                    <polyline class="chart-line @SeriesCssClass(series.Series)" points="@PointsString(series.Points)"></polyline>
+                    @foreach (var point in series.Points)
+                    {
+                        <circle class="chart-point @SeriesCssClass(series.Series)" cx="@Svg(point.X)" cy="@Svg(point.Y)" r="6"
+                                @onmouseenter="() => ShowChartTooltip(point.Month)" @onmouseleave="HideChartTooltip">
+                            <title>@SeriesLabel(series.Series) · @MonthName(point.Month): @Money(point.Value)</title>
+                        </circle>
+                    }
+                }
+                @if (hoveredChartMonth is not null)
+                {
+                    var tooltipPoints = TooltipPoints;
+                    var anchor = tooltipPoints[0];
+                    <foreignObject class="chart-tooltip-object" x="@Svg(TooltipX(anchor))" y="@Svg(TooltipY(anchor, tooltipPoints.Count))" width="200" height="@Svg(48 + tooltipPoints.Count * 22)">
+                        <div class="chart-tooltip">
+                            <small>@MonthName(anchor.Point.Month)</small>
+                            @foreach (var item in tooltipPoints)
+                            {
+                                <span><i class="@SeriesSwatchClass(item.Series)"></i>@SeriesLabel(item.Series)<strong>@Money(item.Point.Value)</strong></span>
+                            }
+                        </div>
+                    </foreignObject>
                 }
             </svg>
-            <p class="chart-help">Prejdi kurzorom na bod pre presnú hodnotu daného mesiaca.</p>
+            <p class="chart-help">Prejdi kurzorom na bod pre presné hodnoty zvolených sérií.</p>
         </div>
         <div class="monthly-calendar">
             @for (var index = 0; index < financialPositionProjection.Count; index++)
@@ -162,13 +210,59 @@ else
                     <div><span>Sporenie</span><b>@Money(position.SavingsBalance)</b></div>
                     <div><span>Investície</span><b>@Money(position.InvestmentBalance)</b></div>
                     <div><span>Cash</span><b>@Money(position.CashOutsideSavings)</b></div>
-                    <footer class="@(cashflow.FreeBeforeSavings >= 0 ? "income-text" : "expense-text")">
+                    <button class="month-cashflow-button @(cashflow.FreeBeforeSavings >= 0 ? "income-text" : "expense-text")"
+                            type="button" @onclick="() => OpenCashFlowDetail(cashflow)">
                         Cashflow @Money(cashflow.FreeBeforeSavings)
-                    </footer>
+                    </button>
                 </article>
             }
         </div>
     </section>
+
+    @if (selectedCashFlow is not null)
+    {
+        <div class="modal-backdrop-custom" @onclick="CloseCashFlowDetail">
+            <section class="cashflow-detail-modal" @onclick:stopPropagation="true">
+                <div class="panel-header">
+                    <div>
+                        <p class="eyebrow">Mesačný cash flow</p>
+                        <h2>@MonthName(selectedCashFlow.Month)</h2>
+                    </div>
+                    <button class="icon-button" type="button" @onclick="CloseCashFlowDetail">×</button>
+                </div>
+
+                <div class="cashflow-detail-section">
+                    <h3>Príjmy <strong class="income-text">+ @Money(selectedCashFlow.Income)</strong></h3>
+                    @foreach (var entry in SelectedIncomeEntries)
+                    {
+                        <div class="cashflow-detail-row"><span>@entry.Name</span><strong class="income-text">+ @Money(entry.MonthlyAmount)</strong></div>
+                    }
+                    @if (SelectedIncomeEntries.Count == 0) { <p class="cashflow-detail-empty">Žiadne príjmy.</p> }
+                </div>
+
+                <div class="cashflow-detail-section">
+                    <h3>Výdavky <strong class="expense-text">- @Money(selectedCashFlow.Expenses)</strong></h3>
+                    @foreach (var entry in SelectedExpenseEntries)
+                    {
+                        <div class="cashflow-detail-row"><span>@entry.Name</span><strong class="expense-text">- @Money(entry.MonthlyAmount)</strong></div>
+                    }
+                    @if (selectedCashFlow.MortgagePayment > 0)
+                    {
+                        <div class="cashflow-detail-row"><span>Automatická splátka hypotéky</span><strong class="expense-text">- @Money(selectedCashFlow.MortgagePayment)</strong></div>
+                    }
+                    @if (SelectedExpenseEntries.Count == 0 && selectedCashFlow.MortgagePayment == 0) { <p class="cashflow-detail-empty">Žiadne výdavky.</p> }
+                </div>
+
+                <div class="cashflow-detail-result">
+                    <div><span>Prebytok pred rozdelením</span><strong>@Money(selectedCashFlow.FreeBeforeSavings)</strong></div>
+                    <div><span>Do sporenia</span><strong class="savings-text">- @Money(selectedCashFlow.SavingsContribution)</strong></div>
+                    <div><span>Do investícií</span><strong class="investment-text">- @Money(selectedCashFlow.InvestmentContribution)</strong></div>
+                    <div class="cashflow-detail-total"><span>Cash po rozdelení</span><strong>@Money(selectedCashFlow.FreeAmount)</strong></div>
+                </div>
+                <a class="text-link" href="cashflow">Upraviť príjmy a výdavky →</a>
+            </section>
+        </div>
+    }
 
     @if (showAllocationModal)
     {
@@ -211,12 +305,16 @@ else
     private readonly List<CashFlowEntry> entries = [];
     private IReadOnlyList<CashFlowProjectionRow> cashFlowProjection = [];
     private IReadOnlyList<FinancialPositionProjectionRow> financialPositionProjection = [];
+    private List<SavingsAccount> estimatedSavingsAccounts = [];
+    private MortgagePlan mortgage = new();
     private CurrentSavingsPosition currentSavingsPosition = new(DateTime.Today, 0, 0, 0, 0, new Dictionary<int, decimal>());
     private CurrentInvestmentPosition currentInvestmentPosition = new(null, 0, 0, 0);
     private string userId = "";
     private string currency = "CZK";
     private bool loading = true;
     private bool showAllocationModal;
+    private bool showPositionDatePicker;
+    private CashFlowProjectionRow? selectedCashFlow;
     private string? allocationError;
     private decimal savingsRatePercent;
     private decimal investmentRatePercent;
@@ -232,17 +330,54 @@ else
     private string todayPieDetail = "";
     private string allocationPieLabel = "100 %";
     private string allocationPieDetail = "prebytok";
+    private readonly HashSet<ChartSeries> selectedChartSeries = [ChartSeries.Total];
+    private DateTime? hoveredChartMonth;
+    private DateTime selectedPositionDate = DateTime.Today;
+    private FinancialPositionForecast selectedPositionForecast = new(DateTime.Today, 0, 0, 0, 0, 0, 0, 0);
 
     private decimal ExpectedTodayTotal => currentSavingsPosition.EstimatedCurrentBalance + currentInvestmentPosition.EstimatedCurrentBalance;
-    private decimal SavingsTodayShare => ExpectedTodayTotal <= 0 ? 0 : currentSavingsPosition.EstimatedCurrentBalance / ExpectedTodayTotal * 100m;
-    private decimal InvestmentTodayShare => ExpectedTodayTotal <= 0 ? 0 : currentInvestmentPosition.EstimatedCurrentBalance / ExpectedTodayTotal * 100m;
+    private decimal SelectedSavingsBalance => selectedPositionDate.Date <= DateTime.Today
+        ? currentSavingsPosition.EstimatedCurrentBalance
+        : selectedPositionForecast.SavingsBalance;
+    private decimal SelectedInvestmentBalance => selectedPositionDate.Date <= DateTime.Today
+        ? currentInvestmentPosition.EstimatedCurrentBalance
+        : selectedPositionForecast.InvestmentBalance;
+    private decimal SelectedPositionTotal => SelectedSavingsBalance + SelectedInvestmentBalance;
+    private decimal SavingsTodayShare => SelectedPositionTotal <= 0 ? 0 : SelectedSavingsBalance / SelectedPositionTotal * 100m;
+    private decimal InvestmentTodayShare => SelectedPositionTotal <= 0 ? 0 : SelectedInvestmentBalance / SelectedPositionTotal * 100m;
+    private string PositionDateLabel => selectedPositionDate.Date == DateTime.Today
+        ? "dnešnému dňu"
+        : selectedPositionDate.ToString("d. M. yyyy", culture);
+    private string TodayInputValue => DateTime.Today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
     private decimal CashRatePercent => Math.Max(0m, 100m - savingsRatePercent - investmentRatePercent);
     private decimal DraftCashRate => Math.Max(0m, 100m - Math.Clamp(draftSavingsRate, 0m, 100m) - Math.Clamp(draftInvestmentRate, 0m, 100m));
     private decimal FinalProjectedTotal => financialPositionProjection.LastOrDefault()?.TotalAvailable ?? ExpectedTodayTotal;
+    private decimal ChartHeaderValue => selectedChartSeries.Count == 1
+        ? ChartValues(selectedChartSeries.Single()).LastOrDefault()
+        : FinalProjectedTotal;
+    private string ChartHeaderCssClass => selectedChartSeries.Count == 1
+        ? SeriesCssClass(selectedChartSeries.Single())
+        : SeriesCssClass(ChartSeries.Total);
+    private IReadOnlyList<ChartSeriesOption> ChartSeriesOptions =>
+    [
+        new(ChartSeries.Total, "Spolu", "total-swatch"),
+        new(ChartSeries.Savings, "Sporenie", "savings-swatch"),
+        new(ChartSeries.Investments, "Investície", "investment-swatch"),
+        new(ChartSeries.Cash, "Cash", "cash-swatch")
+    ];
+    private IReadOnlyList<ChartSeriesData> SelectedSeriesData => CreateSelectedSeriesData();
+    private IReadOnlyList<TooltipPoint> TooltipPoints => hoveredChartMonth is null
+        ? []
+        : SelectedSeriesData.Select(series => new TooltipPoint(
+                series.Series,
+                series.Points.Single(point => point.Month.Year == hoveredChartMonth.Value.Year && point.Month.Month == hoveredChartMonth.Value.Month)))
+            .ToList();
     private string DevelopmentChartPoints => CreateChartPoints();
     private string DevelopmentAreaPoints => $"82,270 {DevelopmentChartPoints} 1070,270";
     private IReadOnlyList<ChartPoint> ChartPoints => CreateChartData();
     private IReadOnlyList<ChartGridline> ChartGridlines => CreateGridlines();
+    private IReadOnlyList<CashFlowEntry> SelectedIncomeEntries => SelectedEntries(CashFlowType.Income);
+    private IReadOnlyList<CashFlowEntry> SelectedExpenseEntries => SelectedEntries(CashFlowType.Expense);
 
     protected override async Task OnInitializedAsync()
     {
@@ -262,14 +397,14 @@ else
         savingsRatePercent = user.SavingsRatePercent;
         investmentRatePercent = user.InvestmentRatePercent;
         var accounts = await DataService.GetSavingsAccountsAsync(userId);
-        var mortgage = await DataService.GetOrCreateMortgagePlanAsync(userId);
+        mortgage = await DataService.GetOrCreateMortgagePlanAsync(userId);
 
         currentSavingsPosition = FinancialCalculator.CalculateCurrentSavingsPosition(entries, accounts, DateTime.Today, mortgage, savingsRatePercent, investmentRatePercent);
         currentInvestmentPosition = FinancialCalculator.CalculateCurrentInvestmentPosition(entries, user.InvestmentBalance, user.InvestmentBalanceUpdatedAtUtc, DateTime.Today, mortgage, savingsRatePercent, investmentRatePercent);
-        var estimatedAccounts = CreateAccountsWithBalances(accounts, currentSavingsPosition.AccountBalances);
+        estimatedSavingsAccounts = CreateAccountsWithBalances(accounts, currentSavingsPosition.AccountBalances);
         var currentMonth = FinancialCalculator.ProjectCashFlow(entries, DateTime.Today, mortgage, savingsRatePercent, investmentRatePercent, 1).First();
         cashFlowProjection = FinancialCalculator.ProjectCashFlow(entries, DateTime.Today.AddMonths(1), mortgage, savingsRatePercent, investmentRatePercent);
-        financialPositionProjection = FinancialCalculator.ProjectFinancialPosition(entries, estimatedAccounts, DateTime.Today.AddMonths(1), mortgage, savingsRatePercent, investmentRatePercent, currentInvestmentPosition.EstimatedCurrentBalance);
+        financialPositionProjection = FinancialCalculator.ProjectFinancialPosition(entries, estimatedSavingsAccounts, DateTime.Today.AddMonths(1), mortgage, savingsRatePercent, investmentRatePercent, currentInvestmentPosition.EstimatedCurrentBalance);
 
         monthlyIncome = currentMonth.Income;
         monthlyExpenses = currentMonth.Expenses;
@@ -277,6 +412,7 @@ else
         monthlySavingsContribution = currentMonth.SavingsContribution;
         monthlyInvestmentContribution = currentMonth.InvestmentContribution;
         monthlyCash = currentMonth.FreeAmount;
+        RecalculateSelectedPosition();
         ClearTodayPieInfo();
         ClearAllocationPieInfo();
     }
@@ -290,6 +426,48 @@ else
     }
 
     private void CloseAllocationModal() => showAllocationModal = false;
+    private void ToggleChartSeries(ChartSeries series)
+    {
+        if (!selectedChartSeries.Remove(series)) selectedChartSeries.Add(series);
+        if (selectedChartSeries.Count == 0) selectedChartSeries.Add(ChartSeries.Total);
+        hoveredChartMonth = null;
+    }
+    private void ShowChartTooltip(DateTime month) => hoveredChartMonth = month;
+    private void HideChartTooltip() => hoveredChartMonth = null;
+    private void TogglePositionDatePicker() => showPositionDatePicker = !showPositionDatePicker;
+    private void ResetPositionDate()
+    {
+        selectedPositionDate = DateTime.Today;
+        ApplyPositionDate();
+    }
+    private void ApplyPositionDate()
+    {
+        if (selectedPositionDate.Date < DateTime.Today) selectedPositionDate = DateTime.Today;
+        RecalculateSelectedPosition();
+        ClearTodayPieInfo();
+        showPositionDatePicker = false;
+    }
+    private void RecalculateSelectedPosition()
+    {
+        selectedPositionForecast = FinancialCalculator.ForecastFinancialPosition(
+            entries,
+            estimatedSavingsAccounts,
+            DateTime.Today.AddMonths(1),
+            selectedPositionDate,
+            mortgage,
+            savingsRatePercent,
+            investmentRatePercent,
+            currentInvestmentPosition.EstimatedCurrentBalance);
+    }
+    private void OpenCashFlowDetail(CashFlowProjectionRow row) => selectedCashFlow = row;
+    private void CloseCashFlowDetail() => selectedCashFlow = null;
+
+    private IReadOnlyList<CashFlowEntry> SelectedEntries(CashFlowType type)
+        => selectedCashFlow is null
+            ? []
+            : entries.Where(entry => entry.Type == type && FinancialCalculator.OccursInMonth(entry, selectedCashFlow.Month))
+                .OrderByDescending(entry => entry.MonthlyAmount)
+                .ToList();
 
     private void SetTodayPieInfo(string label, decimal value, decimal share)
     {
@@ -300,7 +478,7 @@ else
     private void ClearTodayPieInfo()
     {
         todayPieLabel = "Spolu";
-        todayPieDetail = Money(ExpectedTodayTotal);
+        todayPieDetail = Money(SelectedPositionTotal);
     }
 
     private void SetAllocationPieInfo(string label, decimal share)
@@ -340,10 +518,16 @@ else
 
     private IReadOnlyList<ChartPoint> CreateChartData()
     {
-        var values = new[] { ExpectedTodayTotal }.Concat(financialPositionProjection.Select(x => x.TotalAvailable)).ToArray();
+        return CreateChartData(ChartSeries.Total);
+    }
+
+    private IReadOnlyList<ChartPoint> CreateChartData(ChartSeries series)
+    {
+        var values = ChartValues(series);
         var months = new[] { DateTime.Today }.Concat(financialPositionProjection.Select(x => x.Month)).ToArray();
-        var min = values.Min();
-        var max = values.Max();
+        var allValues = selectedChartSeries.SelectMany(ChartValues).ToArray();
+        var min = allValues.Min();
+        var max = allValues.Max();
         var padding = Math.Max(10_000m, (max - min) * .12m);
         var chartMin = Math.Max(0m, min - padding);
         var chartMax = max + padding;
@@ -357,7 +541,7 @@ else
 
     private IReadOnlyList<ChartGridline> CreateGridlines()
     {
-        var values = new[] { ExpectedTodayTotal }.Concat(financialPositionProjection.Select(x => x.TotalAvailable)).ToArray();
+        var values = selectedChartSeries.SelectMany(ChartValues).ToArray();
         var min = values.Min();
         var max = values.Max();
         var padding = Math.Max(10_000m, (max - min) * .12m);
@@ -367,6 +551,46 @@ else
             .Select(index => new ChartGridline(20m + index * 62.5m, chartMax - index * (chartMax - chartMin) / 4m))
             .ToList();
     }
+
+    private IReadOnlyList<ChartSeriesData> CreateSelectedSeriesData()
+        => ChartSeriesOptions.Where(option => selectedChartSeries.Contains(option.Series))
+            .Select(option => new ChartSeriesData(option.Series, CreateChartData(option.Series)))
+            .ToList();
+
+    private decimal[] ChartValues(ChartSeries series) => series switch
+    {
+        ChartSeries.Savings => new[] { currentSavingsPosition.EstimatedCurrentBalance }
+            .Concat(financialPositionProjection.Select(x => x.SavingsBalance)).ToArray(),
+        ChartSeries.Investments => new[] { currentInvestmentPosition.EstimatedCurrentBalance }
+            .Concat(financialPositionProjection.Select(x => x.InvestmentBalance)).ToArray(),
+        ChartSeries.Cash => new[] { 0m }.Concat(financialPositionProjection.Select(x => x.CashOutsideSavings)).ToArray(),
+        _ => new[] { ExpectedTodayTotal }.Concat(financialPositionProjection.Select(x => x.TotalAvailable)).ToArray()
+    };
+
+    private static string PointsString(IReadOnlyList<ChartPoint> points) => string.Join(" ", points.Select(point => $"{Svg(point.X)},{Svg(point.Y)}"));
+    private static string SeriesLabel(ChartSeries series) => series switch
+    {
+        ChartSeries.Savings => "Sporenie",
+        ChartSeries.Investments => "Investície",
+        ChartSeries.Cash => "Cash",
+        _ => "Spolu"
+    };
+    private static string SeriesCssClass(ChartSeries series) => series switch
+    {
+        ChartSeries.Savings => "series-savings",
+        ChartSeries.Investments => "series-investments",
+        ChartSeries.Cash => "series-cash",
+        _ => "series-total"
+    };
+    private static string SeriesSwatchClass(ChartSeries series) => series switch
+    {
+        ChartSeries.Savings => "savings-swatch",
+        ChartSeries.Investments => "investment-swatch",
+        ChartSeries.Cash => "cash-swatch",
+        _ => "total-swatch"
+    };
+    private static decimal TooltipX(TooltipPoint item) => item.Point.X > 880m ? item.Point.X - 205m : item.Point.X + 10m;
+    private static decimal TooltipY(TooltipPoint item, int count) => Math.Max(5m, item.Point.Y - 55m - count * 22m);
 
     private static List<SavingsAccount> CreateAccountsWithBalances(IEnumerable<SavingsAccount> accounts, IReadOnlyDictionary<int, decimal> balances)
         => accounts.Select(account => new SavingsAccount
@@ -384,6 +608,13 @@ else
     private static string Invariant(decimal value) => value.ToString("0.##", CultureInfo.InvariantCulture);
     private string MonthName(DateTime month) => month.ToString("MMM yyyy", culture);
     private string Money(decimal value) => $"{value.ToString("N0", culture)} {currency}";
+    private string DateTimeText(DateTime? value) => value is null
+        ? "zatiaľ nepotvrdené"
+        : value.Value.ToLocalTime().ToString("d. M. yyyy HH:mm", culture);
     private sealed record ChartPoint(DateTime Month, decimal Value, decimal X, decimal Y);
     private sealed record ChartGridline(decimal Y, decimal Value);
+    private sealed record ChartSeriesOption(ChartSeries Series, string Label, string CssClass);
+    private sealed record ChartSeriesData(ChartSeries Series, IReadOnlyList<ChartPoint> Points);
+    private sealed record TooltipPoint(ChartSeries Series, ChartPoint Point);
+    private enum ChartSeries { Total, Savings, Investments, Cash }
 }
